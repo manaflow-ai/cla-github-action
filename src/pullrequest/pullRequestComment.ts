@@ -18,48 +18,101 @@ const ACTIONS_BOT_LOGIN = 'github-actions[bot]'
 // cannot authorize a public marker string as a trusted bot comment.
 const ACTIONS_BOT_ID = 41898282
 
+export interface PullRequestCommentPlan {
+  reactedCommitters: ReactedCommitterMap | undefined
+  apply(): Promise<void>
+}
+
 export default async function prCommentSetup(
   committerMap: CommitterMap,
   committers: Committer[],
   preloadedComments?: PullRequestComment[]
 ) {
+  const plan = await preparePrComment(
+    committerMap,
+    committers,
+    preloadedComments
+  )
+  await plan.apply()
+  return plan.reactedCommitters
+}
+
+/**
+ * Compute the trusted CLA comment update without publishing it. The caller
+ * can validate and persist any newly accepted signatures before apply() makes
+ * an all-signed claim visible on the Pull Request.
+ */
+export async function preparePrComment(
+  committerMap: CommitterMap,
+  committers: Committer[],
+  preloadedComments?: PullRequestComment[]
+): Promise<PullRequestCommentPlan> {
   const signed = committerMap?.notSigned && committerMap?.notSigned.length === 0
 
   try {
     const claBotComment = await getComment(preloadedComments)
     if (!claBotComment) {
-      return createComment(signed, committerMap)
-    } else if (claBotComment?.id) {
-      if (signed) {
-        await updateComment(signed, committerMap, claBotComment)
+      return {
+        reactedCommitters: undefined,
+        apply: () =>
+          applyCommentOperation(() => createComment(signed, committerMap))
       }
+    }
+    if (!Number.isSafeInteger(claBotComment.id) || claBotComment.id <= 0) {
+      throw new Error('The trusted CLA bot comment has an invalid ID')
+    }
 
-      // reacted committers are contributors who have newly signed by posting the Pull Request comment
-      const reactedCommitters = await signatureWithPRComment(
+    // Reacted committers are contributors who have newly signed by posting
+    // the Pull Request comment.
+    const reactedCommitters = await signatureWithPRComment(
+      committerMap,
+      committers,
+      preloadedComments
+    )
+    if (reactedCommitters?.onlyCommitters) {
+      reactedCommitters.allSignedFlag = prepareAllSignedCommitters(
         committerMap,
-        committers,
-        preloadedComments
+        reactedCommitters.onlyCommitters,
+        committers
       )
-      if (reactedCommitters?.onlyCommitters) {
-        reactedCommitters.allSignedFlag = prepareAllSignedCommitters(
-          committerMap,
-          reactedCommitters.onlyCommitters,
-          committers
-        )
-      }
-      committerMap = prepareCommiterMap(committerMap, reactedCommitters)
-      await updateComment(
-        reactedCommitters.allSignedFlag,
-        committerMap,
-        claBotComment
-      )
-      return reactedCommitters
+    }
+
+    return {
+      reactedCommitters,
+      apply: () =>
+        applyCommentOperation(async () => {
+          // Keep the existing two-update behavior when the stored ledger
+          // already says everyone signed. Both writes are deferred together.
+          if (signed) {
+            await updateComment(signed, committerMap, claBotComment)
+          }
+          committerMap = prepareCommiterMap(committerMap, reactedCommitters)
+          await updateComment(
+            reactedCommitters.allSignedFlag,
+            committerMap,
+            claBotComment
+          )
+        })
     }
   } catch (error) {
-    throw new Error(
-      `Error occured when creating or editing the comments of the pull request: ${errorMessage(error)}`
-    )
+    throw commentOperationError(error)
   }
+}
+
+async function applyCommentOperation(
+  operation: () => Promise<void>
+): Promise<void> {
+  try {
+    await operation()
+  } catch (error) {
+    throw commentOperationError(error)
+  }
+}
+
+function commentOperationError(error: unknown): Error {
+  return new Error(
+    `Error occured when creating or editing the comments of the pull request: ${errorMessage(error)}`
+  )
 }
 
 async function createComment(

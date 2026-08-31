@@ -72,6 +72,9 @@ commit that introduced it.
 - Accepted signing comments are re-fetched from the bounded Pull Request
   comment list immediately before a ledger write. An edited, deleted, or
   identity-changed comment fails the run without changing the ledger.
+- The trusted bot publishes an all-signed status only after the action
+  revalidates the signing comments and persists new signatures. A rejected
+  signing comment leaves the prior bot status unchanged.
 
 ### Changed
 

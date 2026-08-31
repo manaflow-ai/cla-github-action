@@ -123,7 +123,7 @@ describe('error paths', () => {
 
     // The action reports the failure through core.setFailed.
     expect(watch.failures.join('\n')).toMatch(
-      /Could not retrieve repository contents|Could not update the JSON file/
+      /Could not retrieve repository contents|Could not complete the CLA check/
     )
     watch.restore()
   })

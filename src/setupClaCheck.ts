@@ -7,7 +7,6 @@ import {
   ClafileContentAndSha,
   CommitterMap,
   Committer,
-  ReactedCommitterMap,
   Signature
 } from './interfaces'
 import {
@@ -15,7 +14,9 @@ import {
   getFileContent,
   updateFile
 } from './persistence/persistence'
-import prCommentSetup from './pullrequest/pullRequestComment'
+import prCommentSetup, {
+  preparePrComment
+} from './pullrequest/pullRequestComment'
 import { errorMessage, errorStatus } from './shared/errors'
 import { requireOpenerAsAuthor } from './shared/getInputs'
 import {
@@ -63,11 +64,12 @@ export async function setupClaCheck() {
   }
 
   try {
-    const reactedCommitters = (await prCommentSetup(
+    const commentPlan = await preparePrComment(
       committerMap,
       committers,
       pullRequestComments
-    )) as ReactedCommitterMap
+    )
+    const reactedCommitters = commentPlan.reactedCommitters
 
     if (reactedCommitters?.newSigned.length) {
       /* pushing the recently signed  contributors to the CLA Json File */
@@ -94,6 +96,10 @@ export async function setupClaCheck() {
       // comments are read. Revalidate even when no ledger write is needed so
       // the action cannot report success from a stale snapshot.
       await validateLivePullRequest(livePullRequest)
+      // Publish an all-signed status only after any new signatures are
+      // revalidated and persisted. A rejected comment leaves the last trusted
+      // bot status unchanged.
+      await commentPlan.apply()
       core.info(`All contributors have signed the CLA 📝 ✅ `)
       if (openerMismatch?.hardFail) {
         core.setFailed(
@@ -103,12 +109,13 @@ export async function setupClaCheck() {
       }
       return
     } else {
+      await commentPlan.apply()
       core.setFailed(
         `Committers of Pull Request number ${context.issue.number} have to sign the CLA 📝`
       )
     }
   } catch (err) {
-    core.setFailed(`Could not update the JSON file: ${errorMessage(err)}`)
+    core.setFailed(`Could not complete the CLA check: ${errorMessage(err)}`)
   }
 }
 

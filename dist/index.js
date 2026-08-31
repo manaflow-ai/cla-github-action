@@ -48899,29 +48899,61 @@ const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
 // cannot authorize a public marker string as a trusted bot comment.
 const ACTIONS_BOT_ID = 41898282;
 async function prCommentSetup(committerMap, committers, preloadedComments) {
+    const plan = await preparePrComment(committerMap, committers, preloadedComments);
+    await plan.apply();
+    return plan.reactedCommitters;
+}
+/**
+ * Compute the trusted CLA comment update without publishing it. The caller
+ * can validate and persist any newly accepted signatures before apply() makes
+ * an all-signed claim visible on the Pull Request.
+ */
+async function preparePrComment(committerMap, committers, preloadedComments) {
     const signed = committerMap?.notSigned && committerMap?.notSigned.length === 0;
     try {
         const claBotComment = await getComment(preloadedComments);
         if (!claBotComment) {
-            return createComment(signed, committerMap);
+            return {
+                reactedCommitters: undefined,
+                apply: () => applyCommentOperation(() => createComment(signed, committerMap))
+            };
         }
-        else if (claBotComment?.id) {
-            if (signed) {
-                await updateComment(signed, committerMap, claBotComment);
-            }
-            // reacted committers are contributors who have newly signed by posting the Pull Request comment
-            const reactedCommitters = await signatureWithPRComment(committerMap, committers, preloadedComments);
-            if (reactedCommitters?.onlyCommitters) {
-                reactedCommitters.allSignedFlag = prepareAllSignedCommitters(committerMap, reactedCommitters.onlyCommitters, committers);
-            }
-            committerMap = prepareCommiterMap(committerMap, reactedCommitters);
-            await updateComment(reactedCommitters.allSignedFlag, committerMap, claBotComment);
-            return reactedCommitters;
+        if (!Number.isSafeInteger(claBotComment.id) || claBotComment.id <= 0) {
+            throw new Error('The trusted CLA bot comment has an invalid ID');
         }
+        // Reacted committers are contributors who have newly signed by posting
+        // the Pull Request comment.
+        const reactedCommitters = await signatureWithPRComment(committerMap, committers, preloadedComments);
+        if (reactedCommitters?.onlyCommitters) {
+            reactedCommitters.allSignedFlag = prepareAllSignedCommitters(committerMap, reactedCommitters.onlyCommitters, committers);
+        }
+        return {
+            reactedCommitters,
+            apply: () => applyCommentOperation(async () => {
+                // Keep the existing two-update behavior when the stored ledger
+                // already says everyone signed. Both writes are deferred together.
+                if (signed) {
+                    await updateComment(signed, committerMap, claBotComment);
+                }
+                committerMap = prepareCommiterMap(committerMap, reactedCommitters);
+                await updateComment(reactedCommitters.allSignedFlag, committerMap, claBotComment);
+            })
+        };
     }
     catch (error) {
-        throw new Error(`Error occured when creating or editing the comments of the pull request: ${errorMessage(error)}`);
+        throw commentOperationError(error);
     }
+}
+async function applyCommentOperation(operation) {
+    try {
+        await operation();
+    }
+    catch (error) {
+        throw commentOperationError(error);
+    }
+}
+function commentOperationError(error) {
+    return new Error(`Error occured when creating or editing the comments of the pull request: ${errorMessage(error)}`);
 }
 async function createComment(signed, committerMap) {
     await octokit.rest.issues
@@ -49292,7 +49324,8 @@ async function setupClaCheck() {
         committerMap.openerMismatch = openerMismatch;
     }
     try {
-        const reactedCommitters = (await prCommentSetup(committerMap, committers, pullRequestComments));
+        const commentPlan = await preparePrComment(committerMap, committers, pullRequestComments);
+        const reactedCommitters = commentPlan.reactedCommitters;
         if (reactedCommitters?.newSigned.length) {
             /* pushing the recently signed  contributors to the CLA Json File */
             await validateSigningCommentsUnchanged(pullRequestComments, reactedCommitters.newSigned);
@@ -49310,6 +49343,10 @@ async function setupClaCheck() {
             // comments are read. Revalidate even when no ledger write is needed so
             // the action cannot report success from a stale snapshot.
             await validateLivePullRequest(livePullRequest);
+            // Publish an all-signed status only after any new signatures are
+            // revalidated and persisted. A rejected comment leaves the last trusted
+            // bot status unchanged.
+            await commentPlan.apply();
             info(`All contributors have signed the CLA 📝 ✅ `);
             if (openerMismatch?.hardFail) {
                 setFailed(`Pull Request opener @${openerMismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`);
@@ -49318,11 +49355,12 @@ async function setupClaCheck() {
             return;
         }
         else {
+            await commentPlan.apply();
             setFailed(`Committers of Pull Request number ${github_context.issue.number} have to sign the CLA 📝`);
         }
     }
     catch (err) {
-        setFailed(`Could not update the JSON file: ${errorMessage(err)}`);
+        setFailed(`Could not complete the CLA check: ${errorMessage(err)}`);
     }
 }
 async function getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments) {
