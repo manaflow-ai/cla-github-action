@@ -3,6 +3,8 @@ import {
   commentContainsSignature,
   isCommentSignedByUser
 } from '../../src/pullrequest/signatureComment'
+import signatureWithPRComment from '../../src/pullrequest/signatureComment'
+import { setContext } from '../testHelpers/context'
 
 const CLA = 'I have read the CLA Document and I hereby sign the CLA'
 const DCO = 'I have read the DCO Document and I hereby sign the DCO'
@@ -107,5 +109,36 @@ describe('isCommentSignedByUser', () => {
     expect(
       isCommentSignedByUser('I accept the terms.', 'alice', 'User', 1001)
     ).toBe(false)
+  })
+})
+
+describe('signatureWithPRComment', () => {
+  afterEach(resetEnv)
+
+  it('validates the commenter account ID instead of the comment ID', async () => {
+    setContext({ issueNumber: 42, payload: { repository: { id: 5555 } } })
+
+    const result = await signatureWithPRComment(
+      {
+        signed: [],
+        notSigned: [{ name: 'alice', id: 9001, pullRequestNo: 42 }],
+        unknown: []
+      },
+      [{ name: 'alice', id: 9001, pullRequestNo: 42 }],
+      [
+        {
+          id: 0,
+          body: CLA,
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+          user: { login: 'alice', id: 9001, type: 'User' }
+        }
+      ] as any
+    )
+
+    expect(result.newSigned.map(comment => comment.id)).toEqual([9001])
+    expect(result.onlyCommitters).toEqual([
+      { name: 'alice', id: 9001, pullRequestNo: 42 }
+    ])
   })
 })
