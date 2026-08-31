@@ -84,6 +84,52 @@ describe('bug fixes', () => {
       expect(watch.failures.join('\n')).toMatch(/Committers of pull request 7/)
       watch.restore()
     })
+
+    it('keeps a first-run signing comment pending until the empty ledger exists', async () => {
+      const watch = watchCore()
+      const repository = fake.repo('acme', 'widgets')
+      repository.addPullRequest({
+        number: 9,
+        head: { sha: 'headsha', ref: 'feature/bootstrap-signature' },
+        user: { login: 'alice', id: 1001 },
+        commits: [{ author: { login: 'alice', id: 1001 } }]
+      })
+      repository.addComment(9, {
+        body: 'I have read the CLA Document and I hereby sign the CLA',
+        user: { login: 'alice', id: 1001, type: 'User' }
+      })
+      setContext({
+        owner: 'acme',
+        repo: 'widgets',
+        issueNumber: 9,
+        actor: 'alice',
+        eventName: 'issue_comment',
+        payload: {
+          action: 'created',
+          issue: { number: 9, state: 'open', pull_request: {} },
+          comment: {
+            body: 'I have read the CLA Document and I hereby sign the CLA',
+            user: { login: 'alice', id: 1001, type: 'User' }
+          },
+          repository: { id: repository.state.id, full_name: 'acme/widgets' }
+        }
+      })
+
+      await runAction()
+
+      const ledger = repository.getFile('signatures/cla.json') as any
+      expect(ledger).toEqual({ signedContributors: [] })
+      const trustedMarker = repository
+        .listComments(9)
+        .find(comment => comment.user.login === 'github-actions[bot]')
+      expect(trustedMarker?.body).not.toMatch(
+        /all contributors have signed the cla/i
+      )
+      expect(trustedMarker?.body).toContain(':x: @alice')
+      expect(trustedMarker?.body).toMatch(/recheck/i)
+      expect(watch.failures.join('\n')).toMatch(/have to sign the CLA/i)
+      watch.restore()
+    })
   })
 
   describe('C3: already-signed contributor with no prior bot comment gets feedback', () => {
