@@ -13,6 +13,10 @@ import {
 } from './pullRequestComments'
 
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]'
+// GitHub's Actions bot account has a stable numeric identity. Require the
+// login, type, and ID together so a compromised or unexpected API response
+// cannot authorize a public marker string as a trusted bot comment.
+const ACTIONS_BOT_ID = 41898282
 
 export default async function prCommentSetup(
   committerMap: CommitterMap,
@@ -117,7 +121,7 @@ async function getComment(preloadedComments?: PullRequestComment[]) {
     if (
       canonicalBot.data.type !== 'Bot' ||
       canonicalBot.data.login.toLowerCase() !== ACTIONS_BOT_LOGIN ||
-      !canonicalBot.data.id
+      canonicalBot.data.id !== ACTIONS_BOT_ID
     ) {
       throw new Error(
         'GitHub did not return the canonical Actions bot identity'
@@ -126,7 +130,7 @@ async function getComment(preloadedComments?: PullRequestComment[]) {
 
     const trusted = markerComments.find(
       comment =>
-        comment.user?.id === canonicalBot.data.id &&
+        comment.user?.id === ACTIONS_BOT_ID &&
         comment.user.login.toLowerCase() ===
           canonicalBot.data.login.toLowerCase() &&
         comment.user.type === canonicalBot.data.type
