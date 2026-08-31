@@ -49,6 +49,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions: {}
+    concurrency:
+      group: cla-admission-${{ github.repository }}-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number }}
+      cancel-in-progress: false
     steps:
       - name: "Validate exact CLA comment"
         shell: bash
@@ -121,9 +124,9 @@ jobs:
 
 Replace `<REPLACE_WITH_CLA_URL>` with the non-empty absolute HTTPS URL of the CLA or DCO. The action rejects an empty, relative, or non-HTTPS value before it makes a GitHub write.
 
-The `CLACommentGate` job has no write permission and no concurrency group. Its `if` guard filters most comments, but GitHub expression equality is case-insensitive. The shell step supplies the required case-sensitive comparison. The privileged `CLAAssistant` job enters its concurrency group only after this gate succeeds. If you set `custom-pr-sign-comment`, replace the default declaration in the gate `if` guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the signer job to run for every issue comment.
+The `CLACommentGate` job has no write permission. Its bounded concurrency group separates each repository, event class, and Pull Request. Its `if` guard filters most comments, but GitHub expression equality is case-insensitive. The shell step is the authority for the required case-sensitive comparison. The privileged `CLAAssistant` job enters its own concurrency group only after this gate succeeds. If you set `custom-pr-sign-comment`, replace the default declaration in the gate `if` guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the signer job to run for every issue comment.
 
-GitHub workflow event admission cannot compare a comment body case-sensitively. The unprivileged gate must start a runner to reject a case variant, but it has no concurrency group and cannot replace valid pending signer work. A high-volume public repository can still spend runner resources on these gate jobs. Use a trusted webhook or GitHub App classifier, or an external rate limit, when that denial-of-service risk is material.
+GitHub workflow event admission cannot compare a comment body case-sensitively. The unprivileged gate must start a runner to reject a case variant. GitHub keeps only one pending run in each concurrency group, so a same-PR case variant can replace one pending gate run before the exact shell check. It cannot enter the privileged signer queue. The contributor must post the exact comment again when this occurs. A high-volume public repository needs a trusted webhook or GitHub App classifier, or an external rate limit, when this fairness or runner-resource denial-of-service risk is material.
 
 The shell step and the action compare the raw comment body and do not trim whitespace. Contributors must post the declaration with no leading or trailing whitespace for it to count as an electronic signature. Keep the `pull_request_target.branches` filter and `required-base-ref` input set to the same protected branch. The event filter avoids unnecessary runs; the action input revalidates the live base branch before a write or lock.
 
