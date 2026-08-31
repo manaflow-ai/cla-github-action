@@ -29,6 +29,7 @@ describe('Pull request event', () => {
     mockedCoreGetInput.mockImplementation((name: string) => {
       if (name === 'lock-pullrequest-aftermerge') return 'true'
       if (name === 'required-base-ref') return 'main'
+      if (name === 'path-to-document') return 'https://example.com/cla'
       return ''
     })
     // @ts-ignore
@@ -115,7 +116,12 @@ describe('Pull request event', () => {
   })
 
   test('a maintainer lock is preserved when automatic locking is disabled', async () => {
-    mockedCoreGetInput.mockImplementation(() => 'false')
+    mockedCoreGetInput.mockImplementation((name: string) => {
+      if (name === 'lock-pullrequest-aftermerge') return 'false'
+      if (name === 'required-base-ref') return 'main'
+      if (name === 'path-to-document') return 'https://example.com/cla'
+      return ''
+    })
     github.context.payload.action = 'reopened'
     github.context.payload.pull_request!.locked = true
     await run()
@@ -126,7 +132,12 @@ describe('Pull request event', () => {
   })
 
   test('a closed event does no CLA work when automatic locking is disabled', async () => {
-    mockedCoreGetInput.mockImplementation(() => 'false')
+    mockedCoreGetInput.mockImplementation((name: string) => {
+      if (name === 'lock-pullrequest-aftermerge') return 'false'
+      if (name === 'required-base-ref') return 'main'
+      if (name === 'path-to-document') return 'https://example.com/cla'
+      return ''
+    })
     await run()
     expect(mockedLockPullRequest).not.toHaveBeenCalled()
     expect(mockedValidateMergedPullRequestForLock).not.toHaveBeenCalled()
@@ -156,15 +167,39 @@ describe('Pull request event', () => {
   })
 
   test('warns when the required base branch is not configured', async () => {
-    mockedCoreGetInput.mockImplementation((name: string) =>
-      name === 'lock-pullrequest-aftermerge' ? 'true' : ''
-    )
+    mockedCoreGetInput.mockImplementation((name: string) => {
+      if (name === 'lock-pullrequest-aftermerge') return 'true'
+      if (name === 'path-to-document') return 'https://example.com/cla'
+      return ''
+    })
     github.context.payload.action = 'opened'
     await run()
     expect(mockedCoreWarning).toHaveBeenCalledWith(
       expect.stringMatching(/required-base-ref.*not set.*any base branch/i)
     )
   })
+
+  test.each(['', 'CLA.md', 'http://example.com/cla', '//example.com/cla'])(
+    'rejects an unsafe path-to-document before any GitHub write: %p',
+    async documentUrl => {
+      mockedCoreGetInput.mockImplementation((name: string) => {
+        if (name === 'lock-pullrequest-aftermerge') return 'true'
+        if (name === 'required-base-ref') return 'main'
+        if (name === 'path-to-document') return documentUrl
+        return ''
+      })
+      github.context.payload.action = 'opened'
+
+      await run()
+
+      expect(core.setFailed).toHaveBeenCalledWith(
+        expect.stringMatching(/path-to-document.*non-empty absolute HTTPS URL/i)
+      )
+      expect(mockedGetClas).not.toHaveBeenCalled()
+      expect(mockedValidateMergedPullRequestForLock).not.toHaveBeenCalled()
+      expect(mockedLockPullRequest).not.toHaveBeenCalled()
+    }
+  )
 
   test('the lockPullRequest  method should not be called if there is a pull request sync', async () => {
     github.context.payload.action = 'synchronize'

@@ -103,6 +103,48 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
     await fake.close()
   })
 
+  it('bundled action rejects a non-HTTPS document URL before GitHub writes', async () => {
+    const repositoryId = fake.repo('acme', 'widgets').state.id
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 7,
+      head: { sha: 'headsha', ref: 'feature/cla' },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake
+      .repo('acme', 'widgets')
+      .setFile('signatures/cla.json', { signedContributors: [] })
+    const eventPath = writeEventFile({
+      action: 'opened',
+      pull_request: {
+        number: 7,
+        state: 'open',
+        head: {
+          sha: 'headsha',
+          ref: 'feature/cla',
+          repo: { id: repositoryId, full_name: 'acme/widgets' }
+        },
+        base: {
+          ref: 'main',
+          repo: { id: repositoryId, full_name: 'acme/widgets' }
+        }
+      },
+      repository: { id: repositoryId, full_name: 'acme/widgets' }
+    })
+
+    const result = await runDist({
+      ...defaultInputEnv({
+        'INPUT_PATH-TO-DOCUMENT': 'http://example.com/cla'
+      }),
+      ...githubEnv(fake, { eventName: 'pull_request_target', eventPath })
+    })
+
+    expect(result.stdout).toMatch(
+      /::error::.*path-to-document.*non-empty absolute HTTPS URL/i
+    )
+    expect(result.code).toBe(1)
+    expect(fake.repo('acme', 'widgets').listComments(7)).toHaveLength(0)
+  }, 20000)
+
   it('bundled action posts a notice comment and reports failure for an unsigned contributor', async () => {
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
