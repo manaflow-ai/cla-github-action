@@ -537,6 +537,86 @@ describe('CLA action end-to-end scenarios', () => {
     )
   })
 
+  it.each([
+    'base branch',
+    'base repository name',
+    'base repository ID',
+    'opener'
+  ] as const)(
+    'does not lock when the closed event has a different immutable %s',
+    async mismatch => {
+      const watch = watchCore()
+      const repository = fake.repo('acme', 'widgets')
+      setInput('lock-pullrequest-aftermerge', 'true')
+      repository.addPullRequest({
+        number: 42,
+        head: {
+          sha: 'merged-headsha',
+          ref: 'feature/immutable-identity',
+          apiRef: 'feature/immutable-identity'
+        },
+        user: { login: 'alice', id: 1001 },
+        merged: true,
+        state: 'closed',
+        commits: [{ author: { login: 'alice', id: 1001 } }]
+      })
+
+      const eventBase = {
+        ref: mismatch === 'base branch' ? 'release' : 'main',
+        repo: {
+          full_name:
+            mismatch === 'base repository name'
+              ? 'mallory/widgets'
+              : 'acme/widgets',
+          id:
+            mismatch === 'base repository ID'
+              ? repository.state.id + 1
+              : repository.state.id
+        }
+      }
+      const eventUser =
+        mismatch === 'opener'
+          ? { login: 'mallory', id: 2002 }
+          : { login: 'alice', id: 1001 }
+
+      setContext({
+        owner: 'acme',
+        repo: 'widgets',
+        issueNumber: 42,
+        eventName: 'pull_request_target',
+        payload: {
+          action: 'closed',
+          pull_request: {
+            number: 42,
+            state: 'closed',
+            merged: true,
+            head: {
+              sha: 'merged-headsha',
+              ref: 'feature/immutable-identity',
+              repo: { full_name: 'acme/widgets', id: repository.state.id }
+            },
+            base: eventBase,
+            user: eventUser
+          },
+          repository: { id: repository.state.id }
+        }
+      })
+
+      await runAction()
+
+      const failures = watch.failures
+      watch.restore()
+      expect(fake.recordedLocks).not.toContainEqual({
+        owner: 'acme',
+        repo: 'widgets',
+        issue: 42
+      })
+      expect(failures.join('\n')).toMatch(
+        /closed pull request event does not match.*identity/i
+      )
+    }
+  )
+
   it('does not lock when a forged closed event disagrees with the live Pull Request', async () => {
     const watch = watchCore()
     setInput('lock-pullrequest-aftermerge', 'true')
