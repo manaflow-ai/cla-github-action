@@ -36,7 +36,11 @@ jobs:
     - name: Verify generated bundle is committed
       # GitHub Actions executes dist/index.js from the consumer's pinned
       # commit. Reject a hand-edited or stale bundle before tests can pass.
-      run: git diff --exit-code -- dist/
+      run: |
+        git diff --exit-code -- dist/
+        test -f dist/index.js
+        git ls-files --error-unmatch dist/index.js >/dev/null
+        test -z "$(git ls-files --others --exclude-standard -- dist/)"
     - name: Lint (prettier + knip + publint)
       run: npm run lint
     - name: Npm test

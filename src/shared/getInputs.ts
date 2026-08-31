@@ -18,7 +18,7 @@ export const getBranch = (): string =>
   core.getInput('branch', { required: false })
 
 export const getRequiredBaseRef = (): string =>
-  core.getInput('required-base-ref', { required: false })
+  core.getInput('required-base-ref', { required: false }) || 'main'
 
 export const getAllowListItem = (): string =>
   core.getInput('allowlist', { required: false })

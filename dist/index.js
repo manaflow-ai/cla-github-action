@@ -48085,7 +48085,7 @@ const getRemoteOrgName = () => {
 const getPathToSignatures = () => getInput('path-to-signatures', { required: false });
 const getPathToDocument = () => getInput('path-to-document', { required: false });
 const getBranch = () => getInput('branch', { required: false });
-const getRequiredBaseRef = () => getInput('required-base-ref', { required: false });
+const getRequiredBaseRef = () => getInput('required-base-ref', { required: false }) || 'main';
 const getAllowListItem = () => getInput('allowlist', { required: false });
 const getAllowListIds = () => getInput('allowlist-ids', { required: false });
 const getSignedCommitMessage = () => getInput('signed-commit-message', { required: false });
@@ -49759,9 +49759,6 @@ async function run() {
     try {
         info(`CLA Assistant GitHub Action bot has started the process`);
         requireHttpsDocumentUrl();
-        if (!getRequiredBaseRef()) {
-            warning(`The 'required-base-ref' input is not set. The action accepts Pull Requests against any base branch. Set it explicitly for protected use.`);
-        }
         if (github_context.payload.action === 'closed') {
             if (lockPullRequestAfterMerge() &&
                 github_context.payload.pull_request?.merged) {

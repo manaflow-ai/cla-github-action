@@ -13,12 +13,6 @@ export async function run() {
 
     requireHttpsDocumentUrl()
 
-    if (!input.getRequiredBaseRef()) {
-      core.warning(
-        `The 'required-base-ref' input is not set. The action accepts Pull Requests against any base branch. Set it explicitly for protected use.`
-      )
-    }
-
     if (context.payload.action === 'closed') {
       if (
         input.lockPullRequestAfterMerge() &&

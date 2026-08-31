@@ -64,17 +64,16 @@ commit that introduced it.
   base branch, opener, state, and merge result before the action locks the
   conversation. A valid live head is still required, but a source branch
   advance or repository deletion after merge does not prevent locking.
-- The new `required-base-ref` input has an empty compatibility default, which
-  preserves upstream behavior. Protected deployments must set it explicitly.
+- The new `required-base-ref` input defaults to `main`, so an omitted input
+  cannot authorize writes or locks for another base branch. Repositories with
+  another contribution branch must set it explicitly.
 - GitHub API failures fail the current run without automatic request replay.
   This prevents an ambiguous lost response from creating duplicate comments
   or ledger writes. Operators can rerun the failed workflow after recovery.
 - The action bounds and snapshots Pull Request comments before any ledger or
   comment write. Only a GitHub `User` actor with a positive account ID can
   create a signature.
-- Merged Pull Request locks use GitHub's valid `resolved` reason. An omitted
-  `required-base-ref` remains compatible but now emits a runtime warning that
-  any base branch is accepted.
+- Merged Pull Request locks use GitHub's valid `resolved` reason.
 - Git names and emails are rendered as escaped, inert text in bot comments.
   Attacker-controlled commit metadata cannot inject Markdown blocks, links,
   or account mentions.

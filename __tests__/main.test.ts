@@ -176,7 +176,7 @@ describe('Pull request event', () => {
     expect(mockedGetClas).toHaveBeenCalled()
   })
 
-  test('warns when the required base branch is not configured', async () => {
+  test('uses the secure base-branch default without a warning', async () => {
     mockedCoreGetInput.mockImplementation((name: string) => {
       if (name === 'lock-pullrequest-aftermerge') return 'true'
       if (name === 'path-to-document') return 'https://example.com/cla'
@@ -184,9 +184,8 @@ describe('Pull request event', () => {
     })
     github.context.payload.action = 'opened'
     await run()
-    expect(mockedCoreWarning).toHaveBeenCalledWith(
-      expect.stringMatching(/required-base-ref.*not set.*any base branch/i)
-    )
+    expect(mockedCoreWarning).not.toHaveBeenCalled()
+    expect(mockedGetClas).toHaveBeenCalled()
   })
 
   test.each(['', 'CLA.md', 'http://example.com/cla', '//example.com/cla'])(

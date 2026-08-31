@@ -1635,8 +1635,9 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('does not write a signature after the live PR is retargeted away from main', async () => {
+  it('does not write a signature to a non-main base when the input is empty', async () => {
     const watch = watchCore()
+    setInput('required-base-ref', '')
     fake.repo('acme', 'widgets').addPullRequest({
       number: 23,
       head: { sha: 'headsha', ref: 'feature/retargeted' },
