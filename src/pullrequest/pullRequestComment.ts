@@ -26,12 +26,14 @@ export interface PullRequestCommentPlan {
 export default async function prCommentSetup(
   committerMap: CommitterMap,
   committers: Committer[],
-  preloadedComments?: PullRequestComment[]
+  preloadedComments?: PullRequestComment[],
+  acceptSigningComments = true
 ) {
   const plan = await preparePrComment(
     committerMap,
     committers,
-    preloadedComments
+    preloadedComments,
+    acceptSigningComments
   )
   await plan.apply()
   return plan.reactedCommitters
@@ -45,7 +47,8 @@ export default async function prCommentSetup(
 export async function preparePrComment(
   committerMap: CommitterMap,
   committers: Committer[],
-  preloadedComments?: PullRequestComment[]
+  preloadedComments?: PullRequestComment[],
+  acceptSigningComments = true
 ): Promise<PullRequestCommentPlan> {
   const signed = committerMap?.notSigned && committerMap?.notSigned.length === 0
 
@@ -62,12 +65,10 @@ export async function preparePrComment(
 
     // Reacted committers are contributors who have newly signed by posting
     // the Pull Request comment.
-    const reactedCommitters = await signatureWithPRComment(
-      committerMap,
-      committers,
-      comments
-    )
-    if (reactedCommitters?.onlyCommitters) {
+    const reactedCommitters: ReactedCommitterMap = acceptSigningComments
+      ? await signatureWithPRComment(committerMap, committers, comments)
+      : { newSigned: [], onlyCommitters: [], allSignedFlag: false }
+    if (acceptSigningComments && reactedCommitters.onlyCommitters) {
       reactedCommitters.allSignedFlag = prepareAllSignedCommitters(
         committerMap,
         reactedCommitters.onlyCommitters,

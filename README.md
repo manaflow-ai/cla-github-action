@@ -119,6 +119,8 @@ The action exposes `signature_recorded=true` only after it persists a new signat
 
 The action publishes an all-signed bot comment only after it revalidates the signing comments and persists any new signatures. If a signer edits or deletes the declaration during the run, the ledger and the previous trusted bot status stay unchanged.
 
+If the signature ledger does not exist, the first run creates an empty ledger and leaves any declaration from that run pending. Post a new `recheck` comment after the ledger exists. The action then validates and records the prior exact declaration before it publishes all-signed status.
+
 The action re-fetches accepted signing comments immediately before a ledger write. It rejects a comment that was edited, deleted, or moved to another identity during the run. GitHub does not provide one transaction for comments and repository contents, so a short race remains between this final check and the ledger write.
 
 > [!IMPORTANT]

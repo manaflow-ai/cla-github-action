@@ -1,6 +1,6 @@
 import * as core from '@actions/core'
 import { installFakeGitHub, FakeGitHub } from '../testHelpers/fakeGithub'
-import { resetEnv, setDefaultInputs } from '../testHelpers/env'
+import { resetEnv, setDefaultInputs, setInput } from '../testHelpers/env'
 import { reloadOctokit, setContext } from '../testHelpers/context'
 
 async function runAction() {
@@ -88,6 +88,7 @@ describe('bug fixes', () => {
     it('keeps a first-run signing comment pending until the empty ledger exists', async () => {
       const watch = watchCore()
       const repository = fake.repo('acme', 'widgets')
+      setInput('suggest-recheck', 'true')
       repository.addPullRequest({
         number: 9,
         head: { sha: 'headsha', ref: 'feature/bootstrap-signature' },
@@ -125,9 +126,44 @@ describe('bug fixes', () => {
       expect(trustedMarker?.body).not.toMatch(
         /all contributors have signed the cla/i
       )
-      expect(trustedMarker?.body).toContain(':x: @alice')
+      expect(trustedMarker?.body).toContain(
+        'I have read the CLA Document and I hereby sign the CLA'
+      )
       expect(trustedMarker?.body).toMatch(/recheck/i)
       expect(watch.failures.join('\n')).toMatch(/have to sign the CLA/i)
+
+      const firstRunFailureCount = watch.failures.length
+      repository.addComment(9, {
+        body: 'recheck',
+        user: { login: 'alice', id: 1001, type: 'User' }
+      })
+      setContext({
+        owner: 'acme',
+        repo: 'widgets',
+        issueNumber: 9,
+        actor: 'alice',
+        eventName: 'issue_comment',
+        payload: {
+          action: 'created',
+          issue: { number: 9, state: 'open', pull_request: {} },
+          comment: {
+            body: 'recheck',
+            user: { login: 'alice', id: 1001, type: 'User' }
+          },
+          repository: { id: repository.state.id, full_name: 'acme/widgets' }
+        }
+      })
+
+      await runAction()
+
+      expect(watch.failures).toHaveLength(firstRunFailureCount)
+      const updatedLedger = repository.getFile('signatures/cla.json') as any
+      expect(updatedLedger.signedContributors).toContainEqual(
+        expect.objectContaining({ name: 'alice', id: 1001 })
+      )
+      expect(trustedMarker?.body).toMatch(
+        /all contributors have signed the cla/i
+      )
       watch.restore()
     })
   })

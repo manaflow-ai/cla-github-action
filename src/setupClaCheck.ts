@@ -238,7 +238,10 @@ async function createClaFileAndPRComment(
       `Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`
     )
   )
-  await prCommentSetup(committerMap, committers, pullRequestComments)
+  // The first run creates an empty ledger. Keep existing declarations pending
+  // until a later run can validate and persist them through the normal update
+  // path. Never publish all-signed status for an empty new ledger.
+  await prCommentSetup(committerMap, committers, pullRequestComments, false)
   throw new Error(
     `Committers of pull request ${context.issue.number} have to sign the CLA`
   )

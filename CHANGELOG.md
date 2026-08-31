@@ -76,6 +76,9 @@ commit that introduced it.
 - The trusted bot publishes an all-signed status only after the action
   revalidates the signing comments and persists new signatures. A rejected
   signing comment leaves the prior bot status unchanged.
+- When the signature ledger does not exist, the first run creates an empty
+  ledger and leaves existing declarations pending with `recheck` guidance. It
+  never publishes all-signed status before those signatures are persisted.
 
 ### Changed
 

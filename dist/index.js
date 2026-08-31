@@ -48898,8 +48898,8 @@ const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
 // login, type, and ID together so a compromised or unexpected API response
 // cannot authorize a public marker string as a trusted bot comment.
 const ACTIONS_BOT_ID = 41898282;
-async function prCommentSetup(committerMap, committers, preloadedComments) {
-    const plan = await preparePrComment(committerMap, committers, preloadedComments);
+async function prCommentSetup(committerMap, committers, preloadedComments, acceptSigningComments = true) {
+    const plan = await preparePrComment(committerMap, committers, preloadedComments, acceptSigningComments);
     await plan.apply();
     return plan.reactedCommitters;
 }
@@ -48908,7 +48908,7 @@ async function prCommentSetup(committerMap, committers, preloadedComments) {
  * can validate and persist any newly accepted signatures before apply() makes
  * an all-signed claim visible on the Pull Request.
  */
-async function preparePrComment(committerMap, committers, preloadedComments) {
+async function preparePrComment(committerMap, committers, preloadedComments, acceptSigningComments = true) {
     const signed = committerMap?.notSigned && committerMap?.notSigned.length === 0;
     try {
         const comments = preloadedComments ?? (await listBoundedPullRequestComments());
@@ -48919,8 +48919,10 @@ async function preparePrComment(committerMap, committers, preloadedComments) {
         }
         // Reacted committers are contributors who have newly signed by posting
         // the Pull Request comment.
-        const reactedCommitters = await signatureWithPRComment(committerMap, committers, comments);
-        if (reactedCommitters?.onlyCommitters) {
+        const reactedCommitters = acceptSigningComments
+            ? await signatureWithPRComment(committerMap, committers, comments)
+            : { newSigned: [], onlyCommitters: [], allSignedFlag: false };
+        if (acceptSigningComments && reactedCommitters.onlyCommitters) {
             reactedCommitters.allSignedFlag = prepareAllSignedCommitters(committerMap, reactedCommitters.onlyCommitters, committers);
         }
         return {
@@ -49446,7 +49448,10 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
     const initialContentBinary = Buffer.from(initialContentString).toString('base64');
     await validateLivePullRequest(livePullRequest);
     await createFile(initialContentBinary).catch((error) => setFailed(`Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`));
-    await prCommentSetup(committerMap, committers, pullRequestComments);
+    // The first run creates an empty ledger. Keep existing declarations pending
+    // until a later run can validate and persist them through the normal update
+    // path. Never publish all-signed status for an empty new ledger.
+    await prCommentSetup(committerMap, committers, pullRequestComments, false);
     throw new Error(`Committers of pull request ${github_context.issue.number} have to sign the CLA`);
 }
 function setupClaCheck_prepareCommiterMap(committers, claFileContent) {
