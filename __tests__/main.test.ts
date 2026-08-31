@@ -78,7 +78,9 @@ describe('Pull request event', () => {
   })
 
   test('a failed lock request is reported through the action failure channel', async () => {
-    mockedLockPullRequest.mockRejectedValueOnce(new Error('lock request failed'))
+    mockedLockPullRequest.mockRejectedValueOnce(
+      new Error('lock request failed')
+    )
 
     await run()
 
