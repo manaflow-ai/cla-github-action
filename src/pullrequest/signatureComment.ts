@@ -95,15 +95,15 @@ export function isCommentSignedByUser(
 /**
  * Decide whether a PR comment counts as signing the CLA/DCO.
  *
- * The configured declaration must be the entire non-whitespace comment body.
- * Case, wording, punctuation, and internal whitespace must match exactly.
+ * The configured declaration must be the entire raw comment body. Case,
+ * wording, punctuation, and every whitespace character must match exactly.
  * This keeps the recorded electronic signature aligned with the declaration
- * in the CLA and rejects quotations, qualifications, and appended commands.
+ * in the CLA and rejects quotations, qualifications, appended commands, and
+ * declarations that only become valid after trimming.
  */
 export function commentContainsSignature(
   commentBody: string,
   signPhrase: string
 ): boolean {
-  const declaration = signPhrase.trim()
-  return declaration.length > 0 && commentBody.trim() === declaration
+  return signPhrase.length > 0 && commentBody === signPhrase
 }

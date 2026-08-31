@@ -8,18 +8,17 @@ const CLA = 'I have read the CLA Document and I hereby sign the CLA'
 const DCO = 'I have read the DCO Document and I hereby sign the DCO'
 
 describe('commentContainsSignature', () => {
-  it.each([
-    ['exact phrase', CLA],
-    ['surrounding spaces', `  ${CLA}  `],
-    ['surrounding blank lines', `\n\n${CLA}\n\n`],
-    ['CRLF around the phrase', `\r\n${CLA}\r\n`]
-  ])('accepts %s', (_, body) => {
+  it.each([['exact phrase', CLA]])('accepts %s', (_, body) => {
     expect(commentContainsSignature(body, CLA)).toBe(true)
   })
 
   it.each([
     ['empty body', ''],
     ['unrelated text', 'recheck'],
+    ['leading spaces', `  ${CLA}`],
+    ['trailing spaces', `${CLA}  `],
+    ['surrounding blank lines', `\n\n${CLA}\n\n`],
+    ['CRLF around the phrase', `\r\n${CLA}\r\n`],
     ['lower-case wording', CLA.toLowerCase()],
     [
       'changed whitespace inside the phrase',
