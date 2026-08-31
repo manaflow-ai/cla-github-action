@@ -152,7 +152,7 @@ If two Pull Requests try to create the first ledger together, the losing run mak
 
 The ledger is shared by all Pull Requests. Each signer workflow can use a per-Pull Request concurrency group, while the action uses bounded optimistic locking for cross-Pull Request writes. On a contents conflict it re-reads the ledger, merges the new signature, revalidates the live Pull Request and signing comment, and retries at most three writes. Persistent contention or an invalid read fails closed, so a contributor must post `recheck` after the queue is available. Extreme concurrent signing can therefore delay availability, but it cannot cause an unbounded runner loop or discard an already committed signature.
 
-The action re-fetches accepted signing comments immediately before a ledger write. It rejects a comment that was edited, deleted, or moved to another identity during the run. GitHub does not provide one transaction for comments and repository contents, so a short race remains between this final check and the ledger write.
+The action re-fetches accepted signing comments immediately before a ledger write. It also re-fetches the authenticated bot marker immediately before each create or update and rejects a stale plan when its presence, ID, identity, body, or timestamps changed. It rejects a comment that was edited, deleted, or moved to another identity during the run. GitHub does not provide one transaction or compare-and-swap operation for comments and repository contents, so a short GET-to-write race remains after the final check. A failed or stale run stays fail-closed and can be retriggered with `recheck`.
 
 > [!IMPORTANT]
 > **Pinning by commit SHA**

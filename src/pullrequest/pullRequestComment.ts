@@ -13,6 +13,18 @@ import {
 } from './pullRequestComments'
 
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]'
+const STALE_BOT_COMMENT_ERROR =
+  'The CLA bot comment changed before this plan could be applied; recheck the Pull Request'
+
+interface BotCommentSnapshot {
+  id: number
+  body: string | undefined
+  userId: number | undefined
+  userLogin: string | undefined
+  userType: string | undefined
+  createdAt: string | undefined
+  updatedAt: string | undefined
+}
 
 export interface PullRequestCommentPlan {
   reactedCommitters: ReactedCommitterMap | undefined
@@ -58,6 +70,7 @@ export async function preparePrComment(
     ) {
       throw new Error('The trusted CLA bot comment has an invalid ID')
     }
+    const initialBotComment = snapshotBotComment(claBotComment)
 
     // Reacted committers are contributors who have newly signed by posting
     // the Pull Request comment.
@@ -82,7 +95,9 @@ export async function preparePrComment(
           )
           refreshedMap.openerMismatch = committerMap.openerMismatch
           committerMap = refreshedMap
+          let expectedBotComment = initialBotComment
           if (!claBotComment) {
+            await assertBotCommentPlanCurrent(expectedBotComment)
             await createComment(
               signed || reactedCommitters.allSignedFlag,
               committerMap
@@ -90,11 +105,28 @@ export async function preparePrComment(
             return
           }
 
-          // Keep the existing two-update behavior when the stored ledger
-          // already says everyone signed. Both writes are deferred together.
-          if (signed) {
-            await updateComment(signed, committerMap, claBotComment)
+          if (!expectedBotComment) {
+            throw new Error(STALE_BOT_COMMENT_ERROR)
           }
+
+          // Keep the existing two-update behavior when the stored ledger
+          // already says everyone signed. Validate the marker before each
+          // write so an older plan cannot overwrite a newer bot status.
+          if (signed) {
+            const body = commentContent(signed, committerMap)
+            await assertBotCommentPlanCurrent(expectedBotComment)
+            const updated = await updateComment(
+              signed,
+              committerMap,
+              claBotComment
+            )
+            expectedBotComment = mergeBotCommentSnapshot(
+              expectedBotComment,
+              updated,
+              body
+            )
+          }
+          await assertBotCommentPlanCurrent(expectedBotComment)
           await updateComment(
             reactedCommitters.allSignedFlag,
             committerMap,
@@ -123,6 +155,69 @@ function commentOperationError(error: unknown): Error {
   )
 }
 
+/**
+ * Re-fetch the canonical bot marker immediately before a comment write. A
+ * concurrent run may have created or updated the marker after this plan was
+ * prepared; applying the stale body would otherwise replace newer status.
+ */
+async function assertBotCommentPlanCurrent(
+  expected: BotCommentSnapshot | undefined
+): Promise<void> {
+  const comments = await listBoundedPullRequestComments()
+  const current = snapshotBotComment(await getComment(comments))
+  if (!sameBotComment(expected, current)) {
+    throw new Error(STALE_BOT_COMMENT_ERROR)
+  }
+}
+
+function snapshotBotComment(comment: unknown): BotCommentSnapshot | undefined {
+  if (!comment || typeof comment !== 'object') return undefined
+  const candidate = comment as PullRequestComment
+  if (!Number.isSafeInteger(candidate.id) || candidate.id <= 0) return undefined
+  return {
+    id: candidate.id,
+    body: candidate.body,
+    userId: candidate.user?.id,
+    userLogin: candidate.user?.login,
+    userType: candidate.user?.type,
+    createdAt: candidate.created_at,
+    updatedAt: candidate.updated_at
+  }
+}
+
+function sameBotComment(
+  expected: BotCommentSnapshot | undefined,
+  current: BotCommentSnapshot | undefined
+): boolean {
+  if (!expected || !current) return expected === current
+  return (
+    expected.id === current.id &&
+    expected.body === current.body &&
+    expected.userId === current.userId &&
+    expected.userLogin === current.userLogin &&
+    expected.userType === current.userType &&
+    expected.createdAt === current.createdAt &&
+    expected.updatedAt === current.updatedAt
+  )
+}
+
+function mergeBotCommentSnapshot(
+  previous: BotCommentSnapshot,
+  updated: unknown,
+  fallbackBody: string
+): BotCommentSnapshot {
+  const response = snapshotBotComment(updated)
+  return {
+    id: response?.id ?? previous.id,
+    body: response?.body ?? fallbackBody,
+    userId: response?.userId ?? previous.userId,
+    userLogin: response?.userLogin ?? previous.userLogin,
+    userType: response?.userType ?? previous.userType,
+    createdAt: response?.createdAt ?? previous.createdAt,
+    updatedAt: response?.updatedAt ?? previous.updatedAt
+  }
+}
+
 async function createComment(
   signed: boolean,
   committerMap: CommitterMap
@@ -145,22 +240,25 @@ async function updateComment(
   signed: boolean,
   committerMap: CommitterMap,
   claBotComment: any
-): Promise<void> {
-  await octokit.rest.issues
-    .updateComment({
+): Promise<unknown> {
+  try {
+    const response = await octokit.rest.issues.updateComment({
       owner: context.repo.owner,
       repo: context.repo.repo,
       comment_id: claBotComment.id,
       body: commentContent(signed, committerMap)
     })
-    .catch(error => {
-      throw new Error(
-        `Error occured when updating the pull request comment: ${errorMessage(error)}`
-      )
-    })
+    return response.data
+  } catch (error) {
+    throw new Error(
+      `Error occured when updating the pull request comment: ${errorMessage(error)}`
+    )
+  }
 }
 
-async function getComment(comments: PullRequestComment[]) {
+async function getComment(
+  comments: PullRequestComment[]
+): Promise<PullRequestComment | undefined> {
   try {
     const marker = getUseDcoFlag()
       ? /.*DCO Assistant Lite bot.*/m

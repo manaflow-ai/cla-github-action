@@ -81,6 +81,10 @@ commit that introduced it.
 - Accepted signing comments are re-fetched from the bounded Pull Request
   comment list immediately before a ledger write. An edited, deleted, or
   identity-changed comment fails the run without changing the ledger.
+- The authenticated bot marker is re-fetched immediately before each comment
+  create or update. A stale plan fails closed when the marker's presence, ID,
+  identity, body, or timestamps changed. GitHub has no atomic compare-and-swap
+  for a comment and the ledger, so a short GET-to-write race remains.
 - The trusted bot publishes an all-signed status only after the action
   revalidates the signing comments and persists new signatures. A rejected
   signing comment leaves the prior bot status unchanged.

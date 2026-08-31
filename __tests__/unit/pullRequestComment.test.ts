@@ -35,7 +35,7 @@ function listCommentsInterceptor(
     .times(times)
 }
 
-function canonicalBotInterceptor(http: MockAgentHarness) {
+function canonicalBotInterceptor(http: MockAgentHarness, times: number = 1) {
   http
     .github()
     .intercept({
@@ -47,6 +47,49 @@ function canonicalBotInterceptor(http: MockAgentHarness) {
       { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
       { headers: { 'content-type': 'application/json' } }
     )
+    .times(times)
+}
+
+function dynamicBotCommentInterceptors(
+  http: MockAgentHarness,
+  commentId: number,
+  initialComments: any[],
+  listTimes: number,
+  patchTimes: number
+) {
+  let comments = initialComments.map(comment => ({ ...comment }))
+  let updateCount = 0
+  http
+    .github()
+    .intercept({
+      path: /\/repos\/acme\/widgets\/issues\/42\/comments(\?.*)?$/,
+      method: 'GET'
+    })
+    .reply(200, () => comments, {
+      headers: { 'content-type': 'application/json' }
+    })
+    .times(listTimes)
+  http
+    .github()
+    .intercept({
+      path: `/repos/acme/widgets/issues/comments/${commentId}`,
+      method: 'PATCH'
+    })
+    .reply(
+      200,
+      (options: any) => {
+        const request = JSON.parse(options.body as string)
+        const updatedAt = `2024-01-02T00:0${++updateCount}:00Z`
+        comments = comments.map(comment =>
+          comment.id === commentId
+            ? { ...comment, body: request.body, updated_at: updatedAt }
+            : comment
+        )
+        return comments.find(comment => comment.id === commentId)
+      },
+      { headers: { 'content-type': 'application/json' } }
+    )
+    .times(patchTimes)
 }
 
 describe('prCommentSetup', () => {
@@ -64,7 +107,7 @@ describe('prCommentSetup', () => {
   })
 
   it('creates a new CLA comment when no prior bot comment exists and unsigned committers remain', async () => {
-    listCommentsInterceptor(http, [])
+    listCommentsInterceptor(http, [], 2)
     const captured = captureJson(
       http.github(),
       { path: '/repos/acme/widgets/issues/42/comments', method: 'POST' },
@@ -93,7 +136,7 @@ describe('prCommentSetup', () => {
   })
 
   it('posts an all-signed comment when there is no prior bot comment and everyone is already signed', async () => {
-    listCommentsInterceptor(http, [])
+    listCommentsInterceptor(http, [], 2)
     const captured = captureJson(
       http.github(),
       { path: '/repos/acme/widgets/issues/42/comments', method: 'POST' },
@@ -114,33 +157,27 @@ describe('prCommentSetup', () => {
   })
 
   it('finds the existing bot comment by the "CLA Assistant Lite bot" marker and updates it', async () => {
-    canonicalBotInterceptor(http)
-    listCommentsInterceptor(http, [
-      {
-        id: 1,
-        body: 'I agree to the CLA',
-        user: { login: 'someone', id: 5 },
-        created_at: '2024-01-01'
-      },
-      {
-        id: 777,
-        body: 'something **CLA Assistant Lite bot** says',
-        user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
-        created_at: '2024-01-02'
-      }
-    ])
-    http
-      .github()
-      .intercept({
-        path: '/repos/acme/widgets/issues/comments/777',
-        method: 'PATCH'
-      })
-      .reply(
-        200,
-        { id: 777 },
-        { headers: { 'content-type': 'application/json' } }
-      )
-      .times(2)
+    canonicalBotInterceptor(http, 3)
+    dynamicBotCommentInterceptors(
+      http,
+      777,
+      [
+        {
+          id: 1,
+          body: 'I agree to the CLA',
+          user: { login: 'someone', id: 5 },
+          created_at: '2024-01-01'
+        },
+        {
+          id: 777,
+          body: 'something **CLA Assistant Lite bot** says',
+          user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+          created_at: '2024-01-02'
+        }
+      ],
+      3,
+      2
+    )
 
     const prCommentSetup = loadModule()
     await prCommentSetup(
@@ -157,33 +194,27 @@ describe('prCommentSetup', () => {
 
   it('finds the DCO bot comment when use-dco-flag is true', async () => {
     setDefaultInputs({ 'use-dco-flag': 'true' })
-    canonicalBotInterceptor(http)
-    listCommentsInterceptor(http, [
-      {
-        id: 1,
-        body: 'unrelated',
-        user: { login: 'x', id: 2 },
-        created_at: '2024-01-01'
-      },
-      {
-        id: 555,
-        body: '**DCO Assistant Lite bot**: content',
-        user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
-        created_at: '2024-01-02'
-      }
-    ])
-    http
-      .github()
-      .intercept({
-        path: '/repos/acme/widgets/issues/comments/555',
-        method: 'PATCH'
-      })
-      .reply(
-        200,
-        { id: 555 },
-        { headers: { 'content-type': 'application/json' } }
-      )
-      .times(2)
+    canonicalBotInterceptor(http, 3)
+    dynamicBotCommentInterceptors(
+      http,
+      555,
+      [
+        {
+          id: 1,
+          body: 'unrelated',
+          user: { login: 'x', id: 2 },
+          created_at: '2024-01-01'
+        },
+        {
+          id: 555,
+          body: '**DCO Assistant Lite bot**: content',
+          user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+          created_at: '2024-01-02'
+        }
+      ],
+      3,
+      2
+    )
 
     const prCommentSetup = loadModule()
     await prCommentSetup(
@@ -198,15 +229,19 @@ describe('prCommentSetup', () => {
   })
 
   it('rejects a spoofed marker comment and creates a new trusted marker', async () => {
-    canonicalBotInterceptor(http)
-    listCommentsInterceptor(http, [
-      {
-        id: 666,
-        body: 'spoofed **CLA Assistant Lite bot** marker',
-        user: { login: 'mallory', id: 9001, type: 'User' },
-        created_at: '2024-01-01'
-      }
-    ])
+    canonicalBotInterceptor(http, 2)
+    listCommentsInterceptor(
+      http,
+      [
+        {
+          id: 666,
+          body: 'spoofed **CLA Assistant Lite bot** marker',
+          user: { login: 'mallory', id: 9001, type: 'User' },
+          created_at: '2024-01-01'
+        }
+      ],
+      2
+    )
     const captured = captureJson(
       http.github(),
       { path: '/repos/acme/widgets/issues/42/comments', method: 'POST' },
@@ -257,6 +292,18 @@ describe('prCommentSetup', () => {
         created_at: '2024-01-01'
       }
     ]
+    http
+      .github()
+      .intercept({
+        path: /\/users\/github-actions(?:%5B|\[)bot(?:%5D|\])$/i,
+        method: 'GET'
+      })
+      .reply(
+        200,
+        { login: 'github-actions[bot]', id: 9001, type: 'Bot' },
+        { headers: { 'content-type': 'application/json' } }
+      )
+    listCommentsInterceptor(http, comments)
     http
       .github()
       .intercept({
@@ -339,12 +386,6 @@ describe('prCommentSetup', () => {
     canonicalBotInterceptor(http)
     canonicalBotInterceptor(http)
     listCommentsInterceptor(http, newerComments)
-    const captured = captureJson(
-      http.github(),
-      { path: '/repos/acme/widgets/issues/comments/777', method: 'PATCH' },
-      { status: 200, body: { id: 777 } }
-    )
-
     const { preparePrComment } = loadCommentModule()
     const plan = await preparePrComment(
       {
@@ -360,7 +401,6 @@ describe('prCommentSetup', () => {
     )
 
     await expect(plan.apply()).rejects.toThrow(/stale.*bot comment|changed/i)
-    expect(captured.body).toBeUndefined()
     http.assertClean()
   })
 
@@ -376,12 +416,6 @@ describe('prCommentSetup', () => {
     ]
     canonicalBotInterceptor(http)
     listCommentsInterceptor(http, currentComments)
-    const captured = captureJson(
-      http.github(),
-      { path: '/repos/acme/widgets/issues/42/comments', method: 'POST' },
-      { status: 201, body: { id: 999 } }
-    )
-
     const { preparePrComment } = loadCommentModule()
     const plan = await preparePrComment(
       {
@@ -394,7 +428,6 @@ describe('prCommentSetup', () => {
     )
 
     await expect(plan.apply()).rejects.toThrow(/stale.*bot comment|changed/i)
-    expect(captured.body).toBeUndefined()
     http.assertClean()
   })
 })
