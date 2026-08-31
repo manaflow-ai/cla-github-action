@@ -116,6 +116,13 @@ describe('signing comment snapshot validation', () => {
         signedContributors: []
       })
       expect(watch.outputs).not.toContainEqual(['signature_recorded', true])
+      const trustedBotComment = repository
+        .listComments(41)
+        .find(comment => comment.user.login === 'github-actions[bot]')
+      expect(trustedBotComment?.body).not.toMatch(
+        /all contributors have signed the cla/i
+      )
+      expect(trustedBotComment?.body).toContain('notice')
       watch.restore()
     }
   )
