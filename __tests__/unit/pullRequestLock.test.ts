@@ -38,7 +38,7 @@ describe('lockPullRequest', () => {
     expect(captured.rawBody === undefined || captured.rawBody === '').toBe(true)
   })
 
-  it('does not throw when the lock endpoint returns an error', async () => {
+  it('fails closed when the lock endpoint returns an error', async () => {
     http
       .github()
       .intercept({ path: '/repos/acme/widgets/issues/123/lock', method: 'PUT' })
@@ -49,6 +49,6 @@ describe('lockPullRequest', () => {
       )
 
     const { lockPullRequest } = loadModule()
-    await expect(lockPullRequest()).resolves.toBeUndefined()
+    await expect(lockPullRequest()).rejects.toThrow(/failed to lock/i)
   })
 })
