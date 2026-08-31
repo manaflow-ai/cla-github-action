@@ -153,6 +153,56 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('records a valid signature when an untrusted comment spoofs the bot marker', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    repository.addPullRequest({
+      number: 46,
+      head: { sha: 'headsha', ref: 'feature/spoofed-marker' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    repository.setFile('signatures/cla.json', { signedContributors: [] })
+    repository.addComment(46, {
+      body: 'spoofed **CLA Assistant Lite bot** marker',
+      user: { login: 'mallory', id: 9001, type: 'User' }
+    })
+    repository.addComment(46, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 46,
+      actor: 'alice',
+      eventName: 'issue_comment',
+      payload: {
+        action: 'created',
+        issue: { number: 46, state: 'open', pull_request: {} },
+        comment: {
+          body: 'I have read the CLA Document and I hereby sign the CLA',
+          user: { login: 'alice', id: 1001, type: 'User' }
+        },
+        repository: { id: repository.state.id, full_name: 'acme/widgets' }
+      }
+    })
+
+    await runAction()
+
+    const ledger = repository.getFile('signatures/cla.json') as any
+    expect(ledger.signedContributors).toContainEqual(
+      expect.objectContaining({ name: 'alice', id: 1001 })
+    )
+    const trustedMarker = repository
+      .listComments(46)
+      .find(comment => comment.user.login === 'github-actions[bot]')
+    expect(trustedMarker?.body).toMatch(/all contributors have signed the cla/i)
+    expect(watch.failures).toEqual([])
+    expect(watch.outputs).toContainEqual(['signature_recorded', true])
+    watch.restore()
+  })
+
   it('Already-signed contributor opens a PR with no prior bot comment: posts an all-signed comment, file untouched', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
