@@ -81,7 +81,7 @@ describe('prCommentSetup', () => {
     )
 
     expect(captured.body.body).toContain('CLA Assistant Lite bot')
-    expect(captured.body.body).toContain(':x: @bob')
+    expect(captured.body.body).toContain(':x: [bob](https://github.com/bob)')
     expect(captured.body.body).toContain(
       ':white_check_mark: [alice](https://github.com/alice)'
     )

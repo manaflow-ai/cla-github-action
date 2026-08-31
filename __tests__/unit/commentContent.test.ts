@@ -39,7 +39,7 @@ describe('commentContent (CLA mode)', () => {
     expect(body).toContain('1** out of **2** committers have signed')
     expect(body).toContain(':white_check_mark:')
     expect(body).toContain('alice')
-    expect(body).toContain(':x: @bob')
+    expect(body).toContain(':x: [bob](https://github.com/bob)')
   })
 
   it('keeps mapped commit identities inert unless they are the authenticated opener', () => {
@@ -64,7 +64,9 @@ describe('commentContent (CLA mode)', () => {
       })
     )
 
-    expect(body).toContain('<code>mapped-account</code>')
+    expect(body).toContain(
+      ':x: [mapped-account](https://github.com/mapped-account)'
+    )
     expect(body).not.toContain('@mapped-account')
     expect(body).toContain(':x: @opener-account')
   })

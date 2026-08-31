@@ -14,6 +14,8 @@
 
 Streamline your workflow and let this GitHub Action (a lite version of [CLA Assistant](https://github.com/cla-assistant/cla-assistant)) handle the legal side of contributions to a repository for you. CLA assistant GitHub action enables contributors to sign CLAs from within a pull request. With this GitHub Action we could get rid of the need for a centrally managed database by **storing the contributor's signature data** in a decentralized way - **in the same repository's file system** or **in a remote repository** which can be even a private repository.
 
+The sample below is an advisory signer workflow. It records signatures and reports the CLA result, but an `issue_comment` run cannot replace a failed `pull_request_target` check on the Pull Request head. If branch protection requires this check, add a separate trusted exact-head worker that accepts only this action's `signature_recorded=true` output, authenticates the commenter, and binds the current Pull Request number, head SHA, base branch, and workflow before calling the Actions rerun API. Keep `actions: write` out of this signer job. Without that worker, leave the CLA check advisory.
+
 ### Features
 1. decentralized data storage
 1. fully integrated within github environment
@@ -47,6 +49,8 @@ jobs:
       github.event.action == 'synchronize')) ||
       (github.event_name == 'issue_comment' &&
       github.event.action == 'created' &&
+      github.event.comment.user.type == 'User' &&
+      github.event.comment.user.id > 0 &&
       github.event.issue.state == 'open' && github.event.issue.pull_request &&
       (github.event.comment.body == 'recheck' ||
       github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
@@ -80,7 +84,9 @@ jobs:
       contents: write # this can be read if signatures are in a remote repository
       issues: write
       pull-requests: write
-    # Serialize signer runs for one Pull Request. A separate lock job uses the
+    # Advisory signer only. A separate trusted exact-head worker is required
+    # when this check is required by branch protection. Serialize signer runs
+    # for one Pull Request. A separate lock job uses the
     # distinct cla-lock group documented below and validates the live PR too.
     concurrency:
       group: cla-signatures-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}
@@ -126,7 +132,7 @@ jobs:
 
 Replace `<REPLACE_WITH_CLA_URL>` with the non-empty absolute HTTPS URL of the CLA or DCO. The action rejects an empty, relative, or non-HTTPS value before it makes a GitHub write.
 
-The `CLACommentGate` job admits the listed `pull_request_target` lifecycle actions and filtered new `issue_comment` events. It has no write permission. Its bounded concurrency group separates each repository, event class, and Pull Request. Its `if` guard filters most comments, but GitHub expression equality is case-insensitive. The shell step runs for comments and is the authority for the required case-sensitive comparison. The privileged `CLAAssistant` job requires gate success for both event classes and enters its own signer concurrency group only after the gate succeeds. If you set `custom-pr-sign-comment`, replace the default declaration in the gate `if` guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the signer job to run for every issue comment.
+The `CLACommentGate` job admits the listed `pull_request_target` lifecycle actions and filtered new `issue_comment` events from a GitHub `User` with a positive account ID. It has no write permission. Its bounded concurrency group separates each repository, event class, and Pull Request. Its `if` guard filters most comments, but GitHub expression equality is case-insensitive. The shell step runs for comments and is the authority for the required case-sensitive comparison. The advisory `CLAAssistant` signer requires gate success for both event classes and enters its own signer concurrency group only after the gate succeeds. A required-check deployment also needs the separate trusted exact-head worker described above. If you set `custom-pr-sign-comment`, replace the default declaration in the gate `if` guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the signer job to run for every issue comment.
 
 GitHub workflow event admission cannot compare a comment body case-sensitively. The unprivileged gate must start a runner to reject a case variant. GitHub keeps only one pending run in each concurrency group, so a same-PR case variant can replace one pending gate run before the exact shell check. It cannot enter the privileged signer queue. The contributor must post the exact comment again when this occurs. A high-volume public repository needs a trusted webhook or GitHub App classifier, or an external rate limit, when this fairness or runner-resource denial-of-service risk is material.
 
@@ -134,7 +140,7 @@ The shell step and the action compare the raw comment body and do not trim white
 
 This version accepts signing and `recheck` only on newly created comments. A declaration comment must have matching GitHub creation and update timestamps. A comment edited into the declaration stays invalid on a later `recheck`. The workflow does not trigger on `issue_comment` `edited` events. The `pull_request_target` `edited` lifecycle event is admitted for the action's live validation. Do not add an issue-comment `edited` trigger unless a later action version validates the edited event and the exact updated declaration at runtime.
 
-The sample lets any Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch.
+The sample lets any authenticated human Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch. The signer sample remains advisory until that worker is installed.
 
 The action exposes `signature_recorded=true` only after it persists a new signature. A separate rerun worker may use that output to refresh the exact failed check for the same Pull Request. Do not authorize a rerun from an arbitrary signing comment when this output is false.
 
@@ -205,7 +211,7 @@ The action fails closed when a Pull Request has more than 1,000 commits, more th
 CLA workflow creates a comment on Pull Request asking contributors who have not signed  CLA to sign and also fails the pull request status check with a `failure`. Contributors must post a new comment with **"I have read the CLA Document and I hereby sign the CLA"** as the full raw Pull Request comment body. Leading or trailing whitespace, blank lines, case changes, wording changes, punctuation, and internal whitespace changes do not count. An edited `issue_comment` does not trigger the workflow, and an edited declaration remains invalid. Put `recheck` in a separate new comment. Only a comment author that GitHub identifies as a `User` with a positive numeric account ID can sign. Bot, organization, mannequin, missing-type, and invalid-ID actors fail closed.
 If the contributor has already signed the CLA, then the PR status will pass with `success`. <br/>
 
-This action does not rerun an earlier workflow after it records a signature. Repositories that need an immediate required-check update must use a separate trusted job. That job must bind the rerun to the current Pull Request number, head commit SHA, workflow file, and base branch before it calls the Actions rerun API.
+This action does not rerun an earlier workflow after it records a signature. Repositories that need an immediate required-check update must use a separate trusted job. That job must authenticate the exact signing event, bind the rerun to the current Pull Request number, head commit SHA, workflow file, and base branch, and then call the Actions rerun API. The sample signer has no `actions: write` permission and is advisory for `issue_comment` runs by design.
 
 The action does not automatically retry GitHub API requests. A transient GitHub failure fails the current run, which can then be rerun after GitHub recovers. This avoids duplicate comments or ledger writes when GitHub completed a state change but its response was lost.
 

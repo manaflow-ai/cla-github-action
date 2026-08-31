@@ -67,7 +67,9 @@ function renderPending(mode: ModeText, committerMap: CommitterMap): string {
     for (const u of committerMap.notSigned) {
       const identity =
         Number.isSafeInteger(u.id) && u.id > 0
-          ? renderGitHubMention(u.name)
+          ? u.isPullRequestOpener
+            ? renderGitHubMention(u.name)
+            : renderGitHubProfile(u.name)
           : renderInertIdentity(u.name)
       text += `<br/>:x: ${identity}`
     }

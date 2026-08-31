@@ -341,7 +341,7 @@ describe('CLA action end-to-end scenarios', () => {
       /Committers of Pull Request number 28/
     )
     expect(fake.repo('acme', 'widgets').listComments(28)[0]!.body).toContain(
-      ':x: @bob'
+      ':x: [bob](https://github.com/bob)'
     )
     watch.restore()
   })
@@ -396,7 +396,7 @@ describe('CLA action end-to-end scenarios', () => {
       /Committers of Pull Request number 30/
     )
     expect(fake.repo('acme', 'widgets').listComments(30)[0]!.body).toContain(
-      ':x: @bob'
+      ':x: [bob](https://github.com/bob)'
     )
     watch.restore()
   })
@@ -889,7 +889,7 @@ describe('CLA action end-to-end scenarios', () => {
     expect(body).toContain(
       ':white_check_mark: [alice](https://github.com/alice)'
     )
-    expect(body).toContain(':x: @bob')
+    expect(body).toContain(':x: [bob](https://github.com/bob)')
     expect(watch.failures.join('\n')).toMatch(
       /Committers of Pull Request number 14/
     )
@@ -942,7 +942,7 @@ describe('CLA action end-to-end scenarios', () => {
       /Committers of Pull Request number 15/
     )
     const body = fake.repo('acme', 'widgets').listComments(15)[0]!.body
-    expect(body).toContain(':x: @bob')
+    expect(body).toContain(':x: [bob](https://github.com/bob)')
     watch.restore()
   })
 
@@ -1129,7 +1129,7 @@ describe('CLA action end-to-end scenarios', () => {
     await runAction()
 
     const body = fake.repo('acme', 'widgets').listComments(18)[0]!.body
-    expect(body).toContain(':x: @bob')
+    expect(body).toContain(':x: [bob](https://github.com/bob)')
     expect(watch.failures.join('\n')).toMatch(
       /Committers of Pull Request number 18/
     )
@@ -1279,7 +1279,7 @@ describe('CLA action end-to-end scenarios', () => {
       /Committers of Pull Request number 25/
     )
     const body = fake.repo('acme', 'widgets').listComments(25)[0]!.body
-    expect(body).toContain(':x: @bob')
+    expect(body).toContain(':x: [bob](https://github.com/bob)')
     watch.restore()
   })
 
