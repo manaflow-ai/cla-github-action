@@ -48671,14 +48671,16 @@ async function signatureWithPRComment(committerMap, committers, preloadedComment
             comment_id: prComment.id,
             body: prComment.body ?? '',
             created_at: prComment.created_at,
+            updated_at: prComment.updated_at,
             repoId,
             pullRequestNo: github_context.issue.number,
             actorType: prComment.user.type
         });
     }
     for (const comment of listOfPRComments) {
-        if (isCommentSignedByUser(comment.body ?? '', comment.name, comment.actorType, comment.id)) {
-            const { body: _, actorType: __, ...withoutBody } = comment;
+        if (isUneditedComment(comment.created_at, comment.updated_at) &&
+            isCommentSignedByUser(comment.body ?? '', comment.name, comment.actorType, comment.id)) {
+            const { body: _, actorType: __, updated_at: ___, ...withoutBody } = comment;
             filteredListOfPRComments.push(withoutBody);
         }
     }
@@ -48696,6 +48698,9 @@ async function signatureWithPRComment(committerMap, committers, preloadedComment
         allSignedFlag: false
     };
     return commentedCommitterMap;
+}
+function isUneditedComment(createdAt, updatedAt) {
+    return Boolean(createdAt && updatedAt && createdAt === updatedAt);
 }
 function isCommentSignedByUser(comment, commentAuthor, actorType, commentAuthorId) {
     if (actorType !== 'User' ||
@@ -49295,6 +49300,7 @@ function sameSigningComment(initial, current) {
 }
 function isCurrentSignature(comment) {
     return Boolean(comment.user &&
+        isUneditedComment(comment.created_at, comment.updated_at) &&
         isCommentSignedByUser(comment.body ?? '', comment.user.login, comment.user.type, comment.user.id));
 }
 

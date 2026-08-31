@@ -30,6 +30,9 @@ commit that introduced it.
   opener. It never exempts an identity derived only from commit metadata.
 - Signature comments must contain only the exact declaration. Appended text,
   changed case or punctuation, quotations, and bot comments do not count.
+- A declaration comment counts only when its GitHub creation and update
+  timestamps match. Editing an older comment into the declaration before a
+  later `recheck` cannot create a signature.
 - Existing CLA marker comments are trusted only when GitHub confirms that the
   canonical Actions bot wrote them. A spoofed marker cannot suppress a valid
   signing comment from the same action run. The verified numeric bot ID comes

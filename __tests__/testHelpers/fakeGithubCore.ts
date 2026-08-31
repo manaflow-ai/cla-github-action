@@ -15,6 +15,7 @@ export interface Comment {
   body: string
   user: { login: string; id: number; type?: 'Bot' | 'User' }
   created_at: string
+  updated_at: string
 }
 
 export interface GitActorFixture {
@@ -91,7 +92,7 @@ export interface FakeRepoHandle {
   addPullRequest(pr: PullRequest): FakeRepoHandle
   addComment(
     issueNumber: number,
-    comment: Omit<Comment, 'id' | 'created_at'>
+    comment: Omit<Comment, 'id' | 'created_at' | 'updated_at'>
   ): Comment
   listComments(issueNumber: number): Comment[]
   isLocked(issueNumber: number): boolean
@@ -397,6 +398,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       const parsed = JSON.parse(body || '{}')
       const repo = getRepo(owner, name)
       const id = repo.nextCommentId++
+      const timestamp = new Date().toISOString()
       const comment: Comment = {
         id,
         body: parsed.body,
@@ -405,7 +407,8 @@ export function createFakeGitHubCore(): FakeGitHubCore {
           id: 41898282,
           type: 'Bot'
         },
-        created_at: new Date().toISOString()
+        created_at: timestamp,
+        updated_at: timestamp
       }
       const list = repo.comments.get(num) || []
       list.push(comment)
@@ -446,6 +449,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
         const c = list.find(c => c.id === id)
         if (c) {
           c.body = parsed.body
+          c.updated_at = new Date().toISOString()
           return json(200, c)
         }
       }
@@ -598,9 +602,11 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       },
       addComment(issueNumber, c) {
         const id = repo.nextCommentId++
+        const timestamp = new Date().toISOString()
         const comment: Comment = {
           id,
-          created_at: new Date().toISOString(),
+          created_at: timestamp,
+          updated_at: timestamp,
           ...c
         }
         const list = repo.comments.get(issueNumber) || []

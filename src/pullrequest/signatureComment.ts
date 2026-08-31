@@ -30,6 +30,7 @@ export default async function signatureWithPRComment(
       comment_id: prComment.id,
       body: prComment.body ?? '',
       created_at: prComment.created_at,
+      updated_at: prComment.updated_at,
       repoId,
       pullRequestNo: context.issue.number,
       actorType: prComment.user.type
@@ -37,6 +38,7 @@ export default async function signatureWithPRComment(
   }
   for (const comment of listOfPRComments) {
     if (
+      isUneditedComment(comment.created_at, comment.updated_at) &&
       isCommentSignedByUser(
         comment.body ?? '',
         comment.name,
@@ -44,7 +46,12 @@ export default async function signatureWithPRComment(
         comment.id
       )
     ) {
-      const { body: _, actorType: __, ...withoutBody } = comment
+      const {
+        body: _,
+        actorType: __,
+        updated_at: ___,
+        ...withoutBody
+      } = comment
       filteredListOfPRComments.push(withoutBody)
     }
   }
@@ -72,6 +79,13 @@ export default async function signatureWithPRComment(
   }
 
   return commentedCommitterMap
+}
+
+export function isUneditedComment(
+  createdAt: string | undefined,
+  updatedAt: string | undefined
+): boolean {
+  return Boolean(createdAt && updatedAt && createdAt === updatedAt)
 }
 
 export function isCommentSignedByUser(

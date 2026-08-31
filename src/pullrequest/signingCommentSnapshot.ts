@@ -1,5 +1,5 @@
 import { SigningComment } from '../interfaces'
-import { isCommentSignedByUser } from './signatureComment'
+import { isCommentSignedByUser, isUneditedComment } from './signatureComment'
 import {
   listBoundedPullRequestComments,
   PullRequestComment
@@ -87,6 +87,7 @@ function sameSigningComment(
 function isCurrentSignature(comment: PullRequestComment): boolean {
   return Boolean(
     comment.user &&
+    isUneditedComment(comment.created_at, comment.updated_at) &&
     isCommentSignedByUser(
       comment.body ?? '',
       comment.user.login,

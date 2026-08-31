@@ -41,6 +41,7 @@ export interface SigningComment extends Committer {
   comment_id?: number | undefined
   body?: string | undefined
   created_at?: string | undefined
+  updated_at?: string | undefined
   repoId?: number | undefined
   actorType?: string | undefined
 }
