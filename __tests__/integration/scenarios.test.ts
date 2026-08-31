@@ -740,7 +740,7 @@ describe('CLA action end-to-end scenarios', () => {
     const body = fake.repo('acme', 'widgets').listComments(16)[0]!.body
     expect(body).toContain('[!CAUTION]')
     expect(body).toContain('@alice')
-    expect(body).toContain('@bob')
+    expect(body).toContain('<code>bob</code>')
     watch.restore()
   })
 
@@ -1079,7 +1079,7 @@ describe('CLA action end-to-end scenarios', () => {
     await runAction()
 
     const body = fake.repo('acme', 'widgets').listComments(19)[0]!.body
-    expect(body).toContain(':x: @github-actions[bot]')
+    expect(body).toContain(':x: <code>github-actions[bot]</code>')
     expect(watch.failures.join('\n')).toMatch(
       /Committers of Pull Request number 19/
     )
