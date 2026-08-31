@@ -655,6 +655,47 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('does not treat GitHub web infrastructure as an unknown human committer', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 21,
+      head: { sha: 'headsha', ref: 'feature/web-edit' },
+      commits: [
+        {
+          author: { login: 'alice', id: 1001 },
+          committer: { name: 'GitHub', email: 'noreply@github.com' }
+        }
+      ]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 21,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 21,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    const body = fake.repo('acme', 'widgets').listComments(21)[0]!.body
+    expect(body).toMatch(/all contributors have signed the cla/i)
+    expect(body).not.toContain('noreply@github.com')
+    expect(watch.failures).toEqual([])
+    watch.restore()
+  })
+
   it('does not silently remove a GitHub Actions bot commit identity', async () => {
     const watch = watchCore()
     setInput('require-opener-as-author', 'false')
