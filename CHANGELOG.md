@@ -87,6 +87,9 @@ commit that introduced it.
 - When the signature ledger does not exist, the first run creates an empty
   ledger and leaves existing declarations pending with `recheck` guidance. It
   never publishes all-signed status before those signatures are persisted.
+- The first missing-ledger comment now includes the opener-authorship guard and
+  its specific failure message, instead of hiding that diagnostic until a
+  later run.
 - If an authenticated allowlisted opener is the only contributor on the first
   Pull Request, ledger creation completes successfully without requesting a
   signature.
