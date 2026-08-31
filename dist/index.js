@@ -48327,9 +48327,7 @@ async function getCommitters() {
                 }
                 addActor(commit.author);
                 commit.authors.nodes.slice(1).forEach(actor => addActor(actor, true));
-                if (!isGitHubInfrastructureCommitter(commit.committer)) {
-                    addActor(commit.committer);
-                }
+                addActor(commit.committer);
             }
             cursor = page.pageInfo.endCursor;
             hasNextPage = page.pageInfo.hasNextPage;
@@ -48370,21 +48368,6 @@ function actorsMatch(left, right) {
     const leftEmail = left.email?.trim().toLowerCase();
     const rightEmail = right.email?.trim().toLowerCase();
     return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
-}
-/**
- * GitHub-created web commits use an unlinked service committer. Requiring that
- * synthetic identity to sign would block every web edit. The exception is
- * intentionally narrow: no linked user, exact GitHub noreply address, and a
- * known GitHub service display name. The PR opener is still added separately,
- * so a contributor cannot use this metadata exception to avoid their own CLA.
- */
-function isGitHubInfrastructureCommitter(actor) {
-    if (!actor || actor.user?.databaseId)
-        return false;
-    if (actor.email?.trim().toLowerCase() !== 'noreply@github.com')
-        return false;
-    const name = actor.name?.trim().toLowerCase();
-    return name === 'github' || name === 'github web flow' || name === 'web-flow';
 }
 
 ;// CONCATENATED MODULE: ./src/persistence/persistence.ts

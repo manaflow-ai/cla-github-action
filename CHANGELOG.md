@@ -15,8 +15,9 @@ commit that introduced it.
 
 - Commit identities now come from GitHub's GraphQL `Commit.authors`
   connection. The action includes the primary author, resolved co-authors, and
-  meaningful committers. It no longer trusts a numeric ID written in a raw
-  `Co-authored-by` trailer.
+  every committer. Unlinked service-looking metadata is not exempt because git
+  names and email addresses can be forged. The action no longer trusts a
+  numeric ID written in a raw `Co-authored-by` trailer.
 - A co-author asserted in commit text must post the exact declaration on the
   current Pull Request. A stored signature from an earlier Pull Request cannot
   satisfy that assertion.
