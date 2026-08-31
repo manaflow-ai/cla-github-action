@@ -49339,7 +49339,28 @@ async function lockPullRequest() {
     }
 }
 
+;// CONCATENATED MODULE: ./src/shared/documentUrl.ts
+
+const INVALID_DOCUMENT_URL = "The 'path-to-document' input must be a non-empty absolute HTTPS URL";
+function requireHttpsDocumentUrl() {
+    const documentUrl = getPathToDocument();
+    let parsed;
+    try {
+        parsed = new URL(documentUrl);
+    }
+    catch {
+        throw new Error(INVALID_DOCUMENT_URL);
+    }
+    if (!/^https:\/\//i.test(documentUrl) ||
+        parsed.protocol !== 'https:' ||
+        !parsed.hostname) {
+        throw new Error(INVALID_DOCUMENT_URL);
+    }
+    return documentUrl;
+}
+
 ;// CONCATENATED MODULE: ./src/main.ts
+
 
 
 
@@ -49349,6 +49370,7 @@ async function lockPullRequest() {
 async function run() {
     try {
         info(`CLA Assistant GitHub Action bot has started the process`);
+        requireHttpsDocumentUrl();
         if (!getRequiredBaseRef()) {
             warning(`The 'required-base-ref' input is not set. The action accepts Pull Requests against any base branch. Set it explicitly for protected use.`);
         }

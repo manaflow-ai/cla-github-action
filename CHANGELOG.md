@@ -13,6 +13,8 @@ commit that introduced it.
 
 ### Security
 
+- The action now rejects an empty, relative, or non-HTTPS
+  `path-to-document` input before it makes a GitHub write.
 - Commit identities now come from GitHub's GraphQL `Commit.authors`
   connection. The action includes the primary author, resolved co-authors, and
   every committer. Unlinked service-looking metadata is not exempt because git

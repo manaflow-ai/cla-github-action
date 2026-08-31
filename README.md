@@ -79,7 +79,7 @@ jobs:
           # PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         with:
           path-to-signatures: 'signatures/version1/cla.json'
-          path-to-document: 'https://link/to/your/cla-or-dco/document' # e.g. a CLA or a DCO document
+          path-to-document: '<REPLACE_WITH_CLA_URL>' # Required absolute HTTPS URL
           # Initialize this branch, then restrict writes to trusted CLA automation.
           branch: 'cla-signatures'
           required-base-ref: 'main'
@@ -101,6 +101,8 @@ jobs:
           #require-opener-as-author: false - if your workflow involves submitters legitimately opening PRs containing only commits authored by others (cherry-picks, release engineering). Default is true.
 
 ```
+
+Replace `<REPLACE_WITH_CLA_URL>` with the non-empty absolute HTTPS URL of the CLA or DCO. The action rejects an empty, relative, or non-HTTPS value before it makes a GitHub write.
 
 The job `if` guard must use the same signing declaration as the action, but GitHub expression equality is case-insensitive. The `Validate exact CLA comment` shell step provides the required case-sensitive comparison before the action runs. If you set `custom-pr-sign-comment`, replace the default declaration in the job guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the guard to run privileged code for every issue comment.
 
@@ -225,7 +227,7 @@ This PAT should have repo scope and is only required if you have configured to s
 
 | Name                  | Requirement | Description | Example |
 | --------------------- | ----------- | ----------- | ------- |
-| `path-to-document`     | _required_ |  provide full URL `https://<clafile>` to the document which shall be signed by the contributor(s)  It can be any file e.g. inside the repository or it can be a gist. | https://github.com/cla-assistant/github-action/blob/master/SAPCLA.md |
+| `path-to-document`     | _required_ | Non-empty absolute HTTPS URL of the CLA or DCO document. The action validates it before any GitHub write. | `<REPLACE_WITH_CLA_URL>` |
 | `path-to-signatures`       | _optional_ |  Path to the JSON file where  all the signatures of the contributors will be stored inside the repository. | signatures/version1/cla.json |
 | `branch`   | _optional_ |  Branch in which all the signatures of the contributors will be stored and Default branch is `master`.  | master |
 | `required-base-ref`   | _optional_ | Only a Pull Request with this live base branch can write signature data or be locked after merge. The compatibility default is empty, which accepts any base branch and emits a runtime warning. Set this input explicitly for protected use. | main |
