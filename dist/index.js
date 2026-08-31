@@ -48097,8 +48097,9 @@ const getCustomPrSignComment = () => getInput('custom-pr-sign-comment', { requir
 const lockPullRequestAfterMerge = () => getInputs_getBooleanInput('lock-pullrequest-aftermerge');
 const suggestRecheck = () => getInputs_getBooleanInput('suggest-recheck');
 /**
- * Whether the PR opener must be recorded as an author, co-author, or committer of at
- * least one commit in the PR. When true (the default), an opener who is not
+ * Whether the PR opener must be recorded as an author or co-author of at
+ * least one commit in the PR. Committer metadata does not qualify because it
+ * is not authenticated. When true (the default), an opener who is not
  * in the authorship trail causes the check to fail — a guard against
  * impersonation of an attacker-submitted patch attributed to a trusted
  * identity. Opt out by setting 'false' if your workflow involves submitters
@@ -48274,19 +48275,25 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
 /**
  * GitHub's Commit.authors connection is the identity source for the primary
  * author and Co-authored-by trailers. GitHub documents that the primary git
- * author is always first. Trailer-derived actors remain assertions, so callers
- * require a current-PR signature for every node after index zero.
+ * author is always first. Trailer-derived and committer-only actors remain
+ * assertions, so callers require a current-PR signature for them. Committer
+ * metadata does not qualify an opener for the author/co-author guard.
  */
 async function getCommitters() {
     try {
         const committers = new Map();
-        const addActor = (actor, requiresCurrentSignature = false) => {
+        const addActor = (actor, role) => {
+            const roles = {
+                isPrimaryAuthor: role === 'primaryAuthor',
+                isCoAuthor: role === 'coAuthor',
+                isCommitter: role === 'committer'
+            };
             if (!actor) {
                 addCommitter(committers, {
                     name: 'Unknown Git identity',
                     id: 0,
                     pullRequestNo: github_context.issue.number,
-                    requiresCurrentSignature
+                    ...roles
                 });
                 return;
             }
@@ -48301,7 +48308,7 @@ async function getCommitters() {
                 id,
                 pullRequestNo: github_context.issue.number,
                 ...(id ? {} : email ? { email } : {}),
-                requiresCurrentSignature
+                ...roles
             });
         };
         let cursor = null;
@@ -48325,9 +48332,11 @@ async function getCommitters() {
                 if (!actorsMatch(commit.author, commit.authors.nodes[0])) {
                     throw new Error('GitHub returned an author connection that did not start with the primary author. The action will fail closed.');
                 }
-                addActor(commit.author);
-                commit.authors.nodes.slice(1).forEach(actor => addActor(actor, true));
-                addActor(commit.committer);
+                addActor(commit.author, 'primaryAuthor');
+                commit.authors.nodes
+                    .slice(1)
+                    .forEach(actor => addActor(actor, 'coAuthor'));
+                addActor(commit.committer, 'committer');
             }
             cursor = page.pageInfo.endCursor;
             hasNextPage = page.pageInfo.hasNextPage;
@@ -48342,14 +48351,23 @@ function addCommitter(committers, incoming) {
     const key = identityKey(incoming);
     const current = committers.get(key);
     if (!current) {
+        incoming.requiresCurrentSignature = requiresCurrentSignature(incoming);
         committers.set(key, incoming);
         return;
     }
-    // If any occurrence is a trailer assertion, keep the stricter rule after
-    // deduplication. Also retain the best available diagnostic email.
-    current.requiresCurrentSignature = Boolean(current.requiresCurrentSignature || incoming.requiresCurrentSignature);
+    current.isPrimaryAuthor = Boolean(current.isPrimaryAuthor || incoming.isPrimaryAuthor);
+    current.isCoAuthor = Boolean(current.isCoAuthor || incoming.isCoAuthor);
+    current.isCommitter = Boolean(current.isCommitter || incoming.isCommitter);
+    // A co-author trailer remains strict after every merge. A committer-only
+    // identity is also metadata and must sign the current PR. When the same
+    // identity is a primary author, its committer role adds no separate person.
+    current.requiresCurrentSignature = requiresCurrentSignature(current);
     if (!current.email && incoming.email)
         current.email = incoming.email;
+}
+function requiresCurrentSignature(committer) {
+    return Boolean(committer.isCoAuthor ||
+        (committer.isCommitter && !committer.isPrimaryAuthor));
 }
 function identityKey(committer) {
     if (committer.id > 0)
@@ -48615,7 +48633,7 @@ function renderOpenerMismatchBlock(mismatch) {
         : '*(no commit authors could be identified)*';
     if (mismatch.hardFail) {
         return `> [!CAUTION]
-> **Pull Request opener is not an author, co-author, or committer of any commit in this PR.**
+> **Pull Request opener is not an author or co-author of any commit in this PR.**
 >
 > - Opener: @${mismatch.opener}
 > - Commit authors: ${authorList}
@@ -48625,7 +48643,7 @@ function renderOpenerMismatchBlock(mismatch) {
 `;
     }
     return `> [!NOTE]
-> Pull Request opener @${mismatch.opener} is not an author, co-author, or committer of any commit in this PR (commit identities: ${authorList}). The CLA check will still proceed and requires every listed identity plus @${mismatch.opener} to have signed.
+> Pull Request opener @${mismatch.opener} is not an author or co-author of any commit in this PR (commit identities: ${authorList}). The CLA check will still proceed and requires every listed identity plus @${mismatch.opener} to have signed.
 
 `;
 }
@@ -48926,9 +48944,13 @@ async function setupClaCheck() {
         if (reactedCommitters?.allSignedFlag ||
             committerMap?.notSigned === undefined ||
             committerMap.notSigned.length === 0) {
+            // A force-push or retarget can happen while commit identities and PR
+            // comments are read. Revalidate even when no ledger write is needed so
+            // the action cannot report success from a stale snapshot.
+            await validateLivePullRequest(livePullRequest);
             info(`All contributors have signed the CLA 📝 ✅ `);
             if (openerMismatch?.hardFail) {
-                setFailed(`Pull Request opener @${openerMismatch.opener} is not recorded as an author, co-author, or committer of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`);
+                setFailed(`Pull Request opener @${openerMismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`);
                 return;
             }
             return;
@@ -49009,7 +49031,7 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
     const initialContentString = JSON.stringify(initialContent, null, 3);
     const initialContentBinary = Buffer.from(initialContentString).toString('base64');
     await validateLivePullRequest(livePullRequest);
-    await createFile(initialContentBinary).catch((error) => setFailed(`Error occurred when creating the signed contributors file: ${errorMessage(error)}. Make sure the branch where signatures are stored is NOT protected.`));
+    await createFile(initialContentBinary).catch((error) => setFailed(`Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`));
     await prCommentSetup(committerMap, committers);
     throw new Error(`Committers of pull request ${github_context.issue.number} have to sign the CLA`);
 }
@@ -49054,7 +49076,8 @@ function includePullRequestOpener(committers, opener) {
 }
 /**
  * Return {opener, commitAuthors, hardFail} if the PR opener is NOT recorded
- * as an author, co-author, or committer of any commit in the PR. This is an
+ * as an author or co-author of any commit in the PR. Committer metadata does
+ * not qualify because it is not independently authenticated. This is an
  * impersonation-adjacent signal: someone opening a PR whose commits are all
  * attributed to someone else. Undefined when the opener is in the trail or
  * when we cannot read the opener identity from the event payload.
@@ -49063,12 +49086,15 @@ function includePullRequestOpener(committers, opener) {
  * decide whether to call setFailed vs just render a warning.
  */
 function detectOpenerMismatch(commitAuthors, opener) {
-    if (commitAuthors.some(c => c.id === opener.id))
+    const authorshipIdentities = commitAuthors.filter(committer => committer.isPrimaryAuthor || committer.isCoAuthor);
+    if (authorshipIdentities.some(c => c.id === opener.id))
         return undefined;
     setOutput('opener_not_in_commits', true);
     return {
         opener: opener.login,
-        commitAuthors: commitAuthors.map(c => c.name).filter(n => n.length > 0),
+        commitAuthors: authorshipIdentities
+            .map(c => c.name)
+            .filter(n => n.length > 0),
         hardFail: requireOpenerAsAuthor()
     };
 }

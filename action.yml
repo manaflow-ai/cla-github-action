@@ -9,7 +9,7 @@ inputs:
     description: "Give a path for storing CLAs in a json file "
     default: "./signatures/cla.json"
   branch:
-    description: "provide a branch where all the CLAs are stored"
+    description: "Branch where signatures are stored. Restrict writes to trusted CLA automation and ensure its token can write."
     default: "master"
   required-base-ref:
     description: "Pull Request base branch allowed to write signatures."
@@ -48,7 +48,7 @@ inputs:
   require-opener-as-author:
     description: >
       When 'true' (the default), fail the check if the Pull Request opener is
-      not recorded as an author, co-author, or committer of any commit in the PR. This
+      not recorded as an author or co-author of any commit in the PR. This
       guards against an attacker opening a PR whose commits are attributed to
       a trusted identity the attacker does not control. Set to 'false' for
       workflows where the PR submitter legitimately pushes commits authored by
@@ -58,8 +58,8 @@ inputs:
 outputs:
   opener_not_in_commits:
     description: >
-      Set to 'true' when the Pull Request opener is not recorded as an author,
-      co-author, or committer of any commit in the PR. Emitted regardless of whether
+      Set to 'true' when the Pull Request opener is not recorded as an author
+      or co-author of any commit in the PR. Emitted regardless of whether
       'require-opener-as-author' caused the check to fail, so repositories
       can gate additional workflows (e.g. branch protection rules) on this
       output independently of the CLA-check pass/fail.

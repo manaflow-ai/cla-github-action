@@ -21,6 +21,10 @@ commit that introduced it.
 - A co-author asserted in commit text must post the exact declaration on the
   current Pull Request. A stored signature from an earlier Pull Request cannot
   satisfy that assertion.
+- A committer-only identity must also sign the current Pull Request. Committer
+  email metadata cannot satisfy the opener author/co-author guard because it
+  is not independently authenticated. Role-aware deduplication keeps this
+  strict rule without making a primary author sign every Pull Request again.
 - The deprecated name, email, and glob `allowlist` is ignored. The new
   `allowlist-ids` input accepts only verified numeric GitHub account IDs.
 - Signature comments must contain only the exact declaration. Appended text,
@@ -28,7 +32,8 @@ commit that introduced it.
 - Existing CLA marker comments are trusted only when GitHub confirms that the
   canonical Actions bot wrote them.
 - The action checks the live Pull Request state, repository, base branch, head
-  commit, and opener before signature work and again before a ledger write.
+  commit, and opener before signature work, before a ledger write, and before
+  it reports success.
 - The signature ledger now rejects invalid entries and removes duplicate IDs.
 - The unsafe branch-based internal workflow rerun was removed. A repository
   must use a separate trusted rerun job that validates the Pull Request number

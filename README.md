@@ -48,6 +48,7 @@ jobs:
     permissions:
       contents: write # this can be read if signatures are in a remote repository
       issues: write
+      pull-requests: write
     steps:
       - name: "CLA Assistant"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
@@ -60,8 +61,8 @@ jobs:
         with:
           path-to-signatures: 'signatures/version1/cla.json'
           path-to-document: 'https://link/to/your/cla-or-dco/document' # e.g. a CLA or a DCO document
-          # branch should not be protected
-          branch: 'main'
+          # Initialize this branch, then restrict writes to trusted CLA automation.
+          branch: 'cla-signatures'
           required-base-ref: 'main'
           # Exempt only GitHub-resolved numeric account IDs. Names and globs are unsafe.
           allowlist-ids: '49699333'
@@ -127,7 +128,9 @@ jobs:
 
 CLA action workflow will be triggered on all Pull Request `opened, closed, edited, reopened, synchronize` events. This workflow will always run in the base repository and that's why we are making use of the [pull_request_target](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request_target) event. The action validates the live Pull Request repository, base branch, head commit, state, and opener before it writes signature data.
 
-The action fails closed for every unlinked committer, including metadata that claims to be `GitHub <noreply@github.com>` or `web-flow`. Git names and email addresses are not authenticated and can be forged. A repository can exempt such a committer only after it has independent authenticated provenance and a verified numeric account ID for `allowlist-ids`.
+The action fails closed for every unlinked committer, including metadata that claims to be `GitHub <noreply@github.com>` or `web-flow`. Git names and email addresses are not authenticated and can be forged. `allowlist-ids` cannot match an unresolved identity. Amend the commit so GitHub resolves it to an authenticated account before an explicit numeric-ID exemption can apply.
+
+A distinct committer is also derived from unauthenticated git metadata. A stored signature from an earlier Pull Request does not satisfy a committer-only identity. That account must post the exact declaration on the current Pull Request or have an explicit verified numeric-ID exemption. A committer-only match does not satisfy the opener author/co-author guard.
 <br/> When the CLA workflow is triggered on pull request `closed` event and the Pull Request was merged, it will lock the Pull Request conversation so that the contributors cannot modify or delete the signatures (Pull Request comment) later. This feature is optional. On a `reopened` event, the action removes a conversation lock it left behind (older versions locked Pull Requests that were closed without merging), so the CLA check can comment again.
 
 #### 3. Signing the CLA
@@ -146,6 +149,8 @@ This action does not rerun an earlier workflow after it records a signature. Rep
 #### 4. Signatures stored in a JSON file
 
 After the contributor signed a CLA, the contributor's signature with metadata will be stored in a JSON file inside the repository and you can specify the custom path to this file with `path-to-signatures` input in the workflow. <br/> The default path is `path-to-signatures: 'signatures/version1/cla.json'`.
+
+Protect the signature ledger from normal collaborator writes. Use a repository ruleset that permits only the trusted CLA automation identity, or store the ledger in a private repository where only that identity can write. The action token or configured App/PAT must have permission to update the protected target.
 
 The signature can be also stored in a remote repository which can be done by enabling the optional inputs `remote-organization-name`: `<your org name>`
 and `remote-repository-name`: `<your repo name>` in your CLA workflow file.
@@ -201,13 +206,13 @@ This PAT should have repo scope and is only required if you have configured to s
 | `lock-pullrequest-aftermerge`   | _optional_ | Boolean input for locking the pull request after merging. Default is set to `true`.  It is highly recommended to lock the Pull Request after merging so that the Contributors won't be able to revoke their signature comments after merge | false |
 | `suggest-recheck`   | _optional_ | Boolean input for indicating if the action's comment should suggest that users comment `recheck`. Default is set to `true`. | false |
 | `use-dco-flag`   | _optional_ | Boolean input. Set to `true` to run the action in DCO (Developer Certificate of Origin) mode instead of CLA mode. The bot's prompts and persistence logic use DCO wording. Default is `false`. | true |
-| `require-opener-as-author`   | _optional_ | Boolean input. When `true` (the default), fail the check if the Pull Request opener is not recorded as an author, co-author, or committer of any commit. Set to `false` for legitimate cherry-pick or patch-submission workflows. | false |
+| `require-opener-as-author`   | _optional_ | Boolean input. When `true` (the default), fail the check if the Pull Request opener is not recorded as an author or co-author of any commit. Committer metadata does not qualify. Set to `false` for legitimate cherry-pick or patch-submission workflows. | false |
 
 ### Outputs
 
 | Name                  | Description |
 | --------------------- | ----------- |
-| `opener_not_in_commits` | Set to `'true'` when the Pull Request opener is not recorded as an author, co-author, or committer of any commit in the PR. Emitted regardless of whether `require-opener-as-author` caused the check to fail. |
+| `opener_not_in_commits` | Set to `'true'` when the Pull Request opener is not recorded as an author or co-author of any commit in the PR. Emitted regardless of whether `require-opener-as-author` caused the check to fail. |
 
 ## Contributors
 

@@ -42,6 +42,8 @@ interface GraphQLResponse {
   }
 }
 
+type CommitIdentityRole = 'primaryAuthor' | 'coAuthor' | 'committer'
+
 const COMMITS_QUERY = `
 query($owner:String! $name:String! $number:Int! $cursor:String){
     repository(owner: $owner, name: $name) {
@@ -82,8 +84,9 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
 /**
  * GitHub's Commit.authors connection is the identity source for the primary
  * author and Co-authored-by trailers. GitHub documents that the primary git
- * author is always first. Trailer-derived actors remain assertions, so callers
- * require a current-PR signature for every node after index zero.
+ * author is always first. Trailer-derived and committer-only actors remain
+ * assertions, so callers require a current-PR signature for them. Committer
+ * metadata does not qualify an opener for the author/co-author guard.
  */
 export default async function getCommitters(): Promise<Committer[]> {
   try {
@@ -91,14 +94,19 @@ export default async function getCommitters(): Promise<Committer[]> {
 
     const addActor = (
       actor: GraphQLActor | null | undefined,
-      requiresCurrentSignature = false
+      role: CommitIdentityRole
     ): void => {
+      const roles = {
+        isPrimaryAuthor: role === 'primaryAuthor',
+        isCoAuthor: role === 'coAuthor',
+        isCommitter: role === 'committer'
+      }
       if (!actor) {
         addCommitter(committers, {
           name: 'Unknown Git identity',
           id: 0,
           pullRequestNo: context.issue.number,
-          requiresCurrentSignature
+          ...roles
         })
         return
       }
@@ -115,7 +123,7 @@ export default async function getCommitters(): Promise<Committer[]> {
         id,
         pullRequestNo: context.issue.number,
         ...(id ? {} : email ? { email } : {}),
-        requiresCurrentSignature
+        ...roles
       })
     }
 
@@ -149,9 +157,11 @@ export default async function getCommitters(): Promise<Committer[]> {
           )
         }
 
-        addActor(commit.author)
-        commit.authors.nodes.slice(1).forEach(actor => addActor(actor, true))
-        addActor(commit.committer)
+        addActor(commit.author, 'primaryAuthor')
+        commit.authors.nodes
+          .slice(1)
+          .forEach(actor => addActor(actor, 'coAuthor'))
+        addActor(commit.committer, 'committer')
       }
 
       cursor = page.pageInfo.endCursor
@@ -173,16 +183,28 @@ function addCommitter(
   const key = identityKey(incoming)
   const current = committers.get(key)
   if (!current) {
+    incoming.requiresCurrentSignature = requiresCurrentSignature(incoming)
     committers.set(key, incoming)
     return
   }
 
-  // If any occurrence is a trailer assertion, keep the stricter rule after
-  // deduplication. Also retain the best available diagnostic email.
-  current.requiresCurrentSignature = Boolean(
-    current.requiresCurrentSignature || incoming.requiresCurrentSignature
+  current.isPrimaryAuthor = Boolean(
+    current.isPrimaryAuthor || incoming.isPrimaryAuthor
   )
+  current.isCoAuthor = Boolean(current.isCoAuthor || incoming.isCoAuthor)
+  current.isCommitter = Boolean(current.isCommitter || incoming.isCommitter)
+  // A co-author trailer remains strict after every merge. A committer-only
+  // identity is also metadata and must sign the current PR. When the same
+  // identity is a primary author, its committer role adds no separate person.
+  current.requiresCurrentSignature = requiresCurrentSignature(current)
   if (!current.email && incoming.email) current.email = incoming.email
+}
+
+function requiresCurrentSignature(committer: Committer): boolean {
+  return Boolean(
+    committer.isCoAuthor ||
+    (committer.isCommitter && !committer.isPrimaryAuthor)
+  )
 }
 
 function identityKey(committer: Committer): string {

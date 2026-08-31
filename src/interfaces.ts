@@ -7,12 +7,19 @@ export interface Committer {
   id: number
   pullRequestNo?: number | undefined
   /**
-   * True for identities that GitHub derived from a Co-authored-by trailer.
-   * A trailer is an assertion in attacker-controlled commit text. A stored
-   * signature from another PR must therefore not satisfy this identity; the
-   * named account must post the exact signature on the current PR.
+   * True when an identity appears in a Co-authored-by trailer, or appears
+   * only as a committer. These fields are assertions in attacker-controlled
+   * git data. A stored signature from another PR must not satisfy this
+   * identity; the named account must post the exact signature on the current
+   * PR.
    */
   requiresCurrentSignature?: boolean | undefined
+  /** GitHub returned this identity as the primary author of a commit. */
+  isPrimaryAuthor?: boolean | undefined
+  /** GitHub returned this identity from a Co-authored-by trailer. */
+  isCoAuthor?: boolean | undefined
+  /** GitHub returned this identity as the git committer of a commit. */
+  isCommitter?: boolean | undefined
   /**
    * Commit-author email. Present only when the GraphQL lookup could not map
    * the commit to a GitHub user (i.e. when this committer ends up in
@@ -41,10 +48,10 @@ export interface CommitterMap {
   notSigned: Committer[]
   unknown: Committer[]
   /**
-   * Populated when the PR opener is not listed as an author, co-author, or committer of
-   * any commit in the PR. The bot comment renders a CAUTION block naming the
-   * opener and the actual commit authors so maintainers can see the
-   * mismatch at a glance.
+   * Populated when the PR opener is not listed as an author or co-author of
+   * any commit in the PR. Committer metadata does not qualify because git
+   * names and email addresses are not authenticated. The bot comment renders
+   * a CAUTION block naming the opener and the actual commit authors.
    */
   openerMismatch?:
     | {

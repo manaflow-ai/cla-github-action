@@ -49,8 +49,9 @@ export const lockPullRequestAfterMerge = (): boolean =>
 export const suggestRecheck = (): boolean => getBooleanInput('suggest-recheck')
 
 /**
- * Whether the PR opener must be recorded as an author, co-author, or committer of at
- * least one commit in the PR. When true (the default), an opener who is not
+ * Whether the PR opener must be recorded as an author or co-author of at
+ * least one commit in the PR. Committer metadata does not qualify because it
+ * is not authenticated. When true (the default), an opener who is not
  * in the authorship trail causes the check to fail — a guard against
  * impersonation of an attacker-submitted patch attributed to a trusted
  * identity. Opt out by setting 'false' if your workflow involves submitters

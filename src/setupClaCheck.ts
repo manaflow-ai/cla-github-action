@@ -65,10 +65,14 @@ export async function setupClaCheck() {
       committerMap?.notSigned === undefined ||
       committerMap.notSigned.length === 0
     ) {
+      // A force-push or retarget can happen while commit identities and PR
+      // comments are read. Revalidate even when no ledger write is needed so
+      // the action cannot report success from a stale snapshot.
+      await validateLivePullRequest(livePullRequest)
       core.info(`All contributors have signed the CLA 📝 ✅ `)
       if (openerMismatch?.hardFail) {
         core.setFailed(
-          `Pull Request opener @${openerMismatch.opener} is not recorded as an author, co-author, or committer of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`
+          `Pull Request opener @${openerMismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`
         )
         return
       }
@@ -182,7 +186,7 @@ async function createClaFileAndPRComment(
   await validateLivePullRequest(livePullRequest)
   await createFile(initialContentBinary).catch((error: unknown) =>
     core.setFailed(
-      `Error occurred when creating the signed contributors file: ${errorMessage(error)}. Make sure the branch where signatures are stored is NOT protected.`
+      `Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`
     )
   )
   await prCommentSetup(committerMap, committers)
@@ -248,7 +252,8 @@ function includePullRequestOpener(
 
 /**
  * Return {opener, commitAuthors, hardFail} if the PR opener is NOT recorded
- * as an author, co-author, or committer of any commit in the PR. This is an
+ * as an author or co-author of any commit in the PR. Committer metadata does
+ * not qualify because it is not independently authenticated. This is an
  * impersonation-adjacent signal: someone opening a PR whose commits are all
  * attributed to someone else. Undefined when the opener is in the trail or
  * when we cannot read the opener identity from the event payload.
@@ -260,11 +265,16 @@ function detectOpenerMismatch(
   commitAuthors: Committer[],
   opener: LivePullRequestSnapshot['opener']
 ): { opener: string; commitAuthors: string[]; hardFail: boolean } | undefined {
-  if (commitAuthors.some(c => c.id === opener.id)) return undefined
+  const authorshipIdentities = commitAuthors.filter(
+    committer => committer.isPrimaryAuthor || committer.isCoAuthor
+  )
+  if (authorshipIdentities.some(c => c.id === opener.id)) return undefined
   core.setOutput('opener_not_in_commits', true)
   return {
     opener: opener.login,
-    commitAuthors: commitAuthors.map(c => c.name).filter(n => n.length > 0),
+    commitAuthors: authorshipIdentities
+      .map(c => c.name)
+      .filter(n => n.length > 0),
     hardFail: requireOpenerAsAuthor()
   }
 }
