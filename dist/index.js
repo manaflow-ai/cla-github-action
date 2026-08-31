@@ -49350,6 +49350,12 @@ async function setupClaCheck() {
     const openerMismatch = detectOpenerMismatch(commitAuthors, livePullRequest.opener);
     let committers = includePullRequestOpener(commitAuthors, livePullRequest.opener);
     committers = checkAllowList(committers);
+    if (openerMismatch) {
+        // The missing-ledger bootstrap path publishes the first bot comment before
+        // this function returns. Carry the guard into that path so its first
+        // diagnostic cannot omit the authenticated opener mismatch.
+        committerMap.openerMismatch = openerMismatch;
+    }
     const claFile = await getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments);
     // A missing ledger was created and no contributor remains after the
     // authenticated opener allowlist. The bootstrap path already published the
@@ -49387,7 +49393,7 @@ async function setupClaCheck() {
             await commentPlan.apply();
             info(`All contributors have signed the CLA 📝 ✅ `);
             if (openerMismatch?.hardFail) {
-                setFailed(`Pull Request opener @${openerMismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`);
+                setFailed(openerMismatchError(openerMismatch));
                 return;
             }
             return;
@@ -49506,6 +49512,9 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
     await prCommentSetup(committerMap, committers, pullRequestComments, false);
     if (committers.length === 0)
         return;
+    if (committerMap.openerMismatch?.hardFail) {
+        throw new Error(openerMismatchError(committerMap.openerMismatch));
+    }
     throw new Error(`Committers of pull request ${github_context.issue.number} have to sign the CLA`);
 }
 async function recoverConcurrentLedgerCreate(createError) {
@@ -49548,6 +49557,9 @@ const getInitialCommittersMap = () => ({
     notSigned: [],
     unknown: []
 });
+function openerMismatchError(mismatch) {
+    return `Pull Request opener @${mismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`;
+}
 /**
  * Prepend the PR opener to the committer set if they are not already present
  * via a commit or Co-authored-by trailer. The PR submitter is a contributor

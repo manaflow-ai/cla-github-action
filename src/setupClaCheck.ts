@@ -54,6 +54,12 @@ export async function setupClaCheck() {
     livePullRequest.opener
   )
   committers = checkAllowList(committers)
+  if (openerMismatch) {
+    // The missing-ledger bootstrap path publishes the first bot comment before
+    // this function returns. Carry the guard into that path so its first
+    // diagnostic cannot omit the authenticated opener mismatch.
+    committerMap.openerMismatch = openerMismatch
+  }
 
   const claFile = await getCLAFileContentandSHA(
     committers,
@@ -111,9 +117,7 @@ export async function setupClaCheck() {
       await commentPlan.apply()
       core.info(`All contributors have signed the CLA 📝 ✅ `)
       if (openerMismatch?.hardFail) {
-        core.setFailed(
-          `Pull Request opener @${openerMismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`
-        )
+        core.setFailed(openerMismatchError(openerMismatch))
         return
       }
       return
@@ -272,6 +276,9 @@ async function createClaFileAndPRComment(
   // path. Never publish all-signed status for an empty new ledger.
   await prCommentSetup(committerMap, committers, pullRequestComments, false)
   if (committers.length === 0) return
+  if (committerMap.openerMismatch?.hardFail) {
+    throw new Error(openerMismatchError(committerMap.openerMismatch))
+  }
   throw new Error(
     `Committers of pull request ${context.issue.number} have to sign the CLA`
   )
@@ -340,6 +347,12 @@ const getInitialCommittersMap = (): CommitterMap => ({
   notSigned: [],
   unknown: []
 })
+
+function openerMismatchError(
+  mismatch: NonNullable<CommitterMap['openerMismatch']>
+): string {
+  return `Pull Request opener @${mismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`
+}
 
 /**
  * Prepend the PR opener to the committer set if they are not already present
