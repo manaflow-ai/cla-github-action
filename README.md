@@ -28,7 +28,7 @@ Streamline your workflow and let this GitHub Action (a lite version of [CLA Assi
 #### 1. Add the following Workflow File to your repository in this path`.github/workflows/cla.yml`
 
 ```yml
-name: "CLA Assistant"
+name: "CLA Assistant v2"
 on:
   issue_comment:
     types: [created]
@@ -58,7 +58,18 @@ jobs:
       queue: max
       cancel-in-progress: false
     steps:
-      - name: "CLA Assistant"
+      - name: "Validate exact CLA comment"
+        if: github.event_name == 'issue_comment'
+        shell: bash
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          SIGN_PHRASE: I have read the CLA Document and I hereby sign the CLA
+        run: |
+          if [[ "$COMMENT_BODY" != "recheck" && "$COMMENT_BODY" != "$SIGN_PHRASE" ]]; then
+            echo "::error::Comment must match the recheck command or signing declaration exactly."
+            exit 1
+          fi
+      - name: "CLA Assistant v2"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
         uses: manaflow-ai/cla-github-action@e228b3c6860cb66ffca9d68dcb074c2e66c4c431
         env:
@@ -91,9 +102,9 @@ jobs:
 
 ```
 
-The job `if` guard must use the same exact signing declaration as the action. If you set `custom-pr-sign-comment`, replace the default CLA declaration in the guard with that custom text. If you set `use-dco-flag: true`, replace it with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the guard to run privileged code for every issue comment.
+The job `if` guard must use the same signing declaration as the action, but GitHub expression equality is case-insensitive. The `Validate exact CLA comment` shell step provides the required case-sensitive comparison before the action runs. If you set `custom-pr-sign-comment`, replace the default declaration in the job guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the guard to run privileged code for every issue comment.
 
-The issue-comment guard compares the raw body and does not trim whitespace. Contributors must post the declaration with no leading or trailing whitespace for that event to start the job. The action itself ignores only surrounding whitespace after it starts. Keep the `pull_request_target.branches` filter and `required-base-ref` input set to the same protected branch. The event filter avoids unnecessary runs; the action input revalidates the live base branch before a write or lock.
+The shell step compares the raw comment body and does not trim whitespace. Contributors must post the declaration with no leading or trailing whitespace for that event to pass. The action itself ignores only surrounding whitespace after it starts. Keep the `pull_request_target.branches` filter and `required-base-ref` input set to the same protected branch. The event filter avoids unnecessary runs; the action input revalidates the live base branch before a write or lock.
 
 The sample lets any Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch.
 
@@ -218,7 +229,7 @@ This PAT should have repo scope and is only required if you have configured to s
 | `path-to-signatures`       | _optional_ |  Path to the JSON file where  all the signatures of the contributors will be stored inside the repository. | signatures/version1/cla.json |
 | `branch`   | _optional_ |  Branch in which all the signatures of the contributors will be stored and Default branch is `master`.  | master |
 | `required-base-ref`   | _optional_ | Only a Pull Request with this live base branch can write signature data or be locked after merge. The compatibility default is empty, which accepts any base branch and emits a runtime warning. Set this input explicitly for protected use. | main |
-| `allowlist-ids`   | _optional_ | Comma-separated numeric GitHub user IDs. Only the authenticated live Pull Request opener can be exempt. Commit-derived identities are never exempt. | 49699333,29139614 |
+| `allowlist-ids`   | _optional_ | Comma-separated numeric GitHub user IDs. Only the authenticated live Pull Request opener can be exempt. Commit-derived identities are never exempt. | Leave empty unless a documented automated opener was reviewed. |
 | `allowlist`   | _deprecated_ | Ignored. Raw names, emails, and globs are unsafe identity evidence. | |
 | `remote-repository-name`   | _optional_ | provide the remote repository name where all the signatures should be stored . | remote repository name |
 | `remote-organization-name`   | _optional_ | provide the remote organization name where all the signatures should be stored. | remote organization name |
