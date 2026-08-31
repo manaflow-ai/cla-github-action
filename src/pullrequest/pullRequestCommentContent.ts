@@ -194,6 +194,9 @@ function renderInertIdentity(value: string): string {
   const normalized =
     value
       .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+      // Invisible Unicode format characters can reorder or hide attacker-
+      // controlled identities in a reviewer-facing comment. Keep them inert.
+      .replace(/\p{Cf}+/gu, ' ')
       .replace(/\s+/g, ' ')
       .trim() || '(unknown)'
   return `<code>${escapeHtml(normalized)}</code>`
