@@ -55,7 +55,9 @@ jobs:
     # Contents API writes can race on the ledger file SHA.
     concurrency:
       group: cla-signatures-${{ github.repository }}
-      queue: max
+      # Keep cancellation disabled. GitHub retains one running and one
+      # pending run for this group; a separate admission gate should reject
+      # arbitrary comments before this queue.
       cancel-in-progress: false
     steps:
       - name: "Validate exact CLA comment"
@@ -71,7 +73,7 @@ jobs:
           fi
       - name: "CLA Assistant v2"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@b7a9d19a189cb373b70454143eebeb71ffdb524e
+        uses: manaflow-ai/cla-github-action@0b53543e4462accbdde6edc1329482130f9384b8
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # the below token should have repo scope and must be manually added by you in the repository's secret
@@ -142,7 +144,7 @@ The action exposes `signature_recorded=true` only after it persists a new signat
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: manaflow-ai/cla-github-action@b7a9d19a189cb373b70454143eebeb71ffdb524e
+> uses: manaflow-ai/cla-github-action@0b53543e4462accbdde6edc1329482130f9384b8
 > ```
 >
 > Tools like [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
@@ -187,7 +189,7 @@ After the contributor signed a CLA, the contributor's signature with metadata wi
 
 Protect the signature ledger from normal collaborator writes. Use a repository ruleset that permits only the trusted CLA automation identity, or store the ledger in a private repository where only that identity can write. The action token or configured App/PAT must have permission to update the protected target.
 
-If you split merged-pull-request locking into another job, give that job the same `cla-signatures-${{ github.repository }}` concurrency group and set `queue: max` with `cancel-in-progress: false`. This serializes lock and ledger writes.
+If you split merged-pull-request locking into another job, give that job the same `cla-signatures-${{ github.repository }}` concurrency group and set `cancel-in-progress: false`. This serializes lock and ledger writes while retaining GitHub's bounded default queue.
 
 Ledger entries do not contain a CLA document hash or terms version. If the CLA text changes, use a new ledger path and signing declaration, and require contributors to sign again. Without this policy, an old ledger entry cannot prove which document version the contributor accepted.
 
@@ -211,7 +213,7 @@ Use `allowlist-ids` only when a specific automated Pull Request opener must be e
 #### 6. Adding Personal Access Token as a Secret
 
 You have to create a [Repository Secret](https://docs.github.com/en/actions/security-guides/encrypted-secrets#creating-encrypted-secrets-for-a-repository) with the name `PERSONAL_ACCESS_TOKEN`.
-This PAT should have repo scope and is only required if you have configured to store the signatures in a remote repository/organization.
+For a remote signature repository, prefer a fine-grained token scoped only to that repository with Contents read and write access. A classic `repo` token is broader than necessary and should be used only when the target cannot use a fine-grained token.
 
 ##### Demo for step 6
 
@@ -252,6 +254,7 @@ This PAT should have repo scope and is only required if you have configured to s
 | Name                  | Description |
 | --------------------- | ----------- |
 | `opener_not_in_commits` | Set to `'true'` when the Pull Request opener is not recorded as an author or co-author of any commit in the PR. Emitted regardless of whether `require-opener-as-author` caused the check to fail. |
+| `signature_recorded` | Set to `'true'` only after this run persists a new signature in the ledger. |
 
 ## Contributors
 
