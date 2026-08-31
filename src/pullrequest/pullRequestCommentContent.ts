@@ -1,3 +1,4 @@
+import { context } from '@actions/github'
 import { Committer, CommitterMap } from '../interfaces'
 import * as input from '../shared/getInputs'
 import { getPrSignComment } from '../shared/pr-sign-comment'
@@ -187,9 +188,42 @@ function renderGitHubMention(login: string): string {
 }
 
 function renderGitHubProfile(login: string): string {
-  return GITHUB_LOGIN.test(login)
-    ? `[${login}](https://github.com/${encodeURIComponent(login)})`
+  if (!GITHUB_LOGIN.test(login)) return renderInertIdentity(login)
+  const serverOrigin = getGitHubServerOrigin()
+  return serverOrigin
+    ? `[${login}](${serverOrigin}/${encodeURIComponent(login)})`
     : renderInertIdentity(login)
+}
+
+/**
+ * Build profile links against the GitHub host that delivered this workflow.
+ * The Actions context is trusted runtime metadata, but parse it before placing
+ * it in Markdown so malformed or non-web values produce inert identity text.
+ */
+function getGitHubServerOrigin(): string | undefined {
+  const serverUrl = context.serverUrl
+  if (typeof serverUrl !== 'string' || serverUrl.trim().length === 0) {
+    // Older test doubles and custom runners may not expose serverUrl. Keep
+    // their historical public-GitHub rendering while real Actions contexts
+    // always provide the current server URL.
+    return 'https://github.com'
+  }
+
+  try {
+    const parsed = new URL(serverUrl)
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return undefined
+    }
+    return parsed.origin
+  } catch {
+    return undefined
+  }
 }
 
 function renderInertIdentity(value: string): string {

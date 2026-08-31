@@ -48746,6 +48746,7 @@ function commentContainsSignature(commentBody, signPhrase) {
 ;// CONCATENATED MODULE: ./src/pullrequest/pullRequestCommentContent.ts
 
 
+
 const CLA = {
     label: 'CLA',
     documentTitle: 'Contributor License Agreement',
@@ -48889,9 +48890,40 @@ function renderGitHubMention(login) {
     return GITHUB_LOGIN.test(login) ? `@${login}` : renderInertIdentity(login);
 }
 function renderGitHubProfile(login) {
-    return GITHUB_LOGIN.test(login)
-        ? `[${login}](https://github.com/${encodeURIComponent(login)})`
+    if (!GITHUB_LOGIN.test(login))
+        return renderInertIdentity(login);
+    const serverOrigin = getGitHubServerOrigin();
+    return serverOrigin
+        ? `[${login}](${serverOrigin}/${encodeURIComponent(login)})`
         : renderInertIdentity(login);
+}
+/**
+ * Build profile links against the GitHub host that delivered this workflow.
+ * The Actions context is trusted runtime metadata, but parse it before placing
+ * it in Markdown so malformed or non-web values produce inert identity text.
+ */
+function getGitHubServerOrigin() {
+    const serverUrl = github_context.serverUrl;
+    if (typeof serverUrl !== 'string' || serverUrl.trim().length === 0) {
+        // Older test doubles and custom runners may not expose serverUrl. Keep
+        // their historical public-GitHub rendering while real Actions contexts
+        // always provide the current server URL.
+        return 'https://github.com';
+    }
+    try {
+        const parsed = new URL(serverUrl);
+        if (parsed.protocol !== 'https:' ||
+            parsed.username ||
+            parsed.password ||
+            parsed.search ||
+            parsed.hash) {
+            return undefined;
+        }
+        return parsed.origin;
+    }
+    catch {
+        return undefined;
+    }
 }
 function renderInertIdentity(value) {
     const normalized = value

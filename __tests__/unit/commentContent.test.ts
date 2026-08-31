@@ -301,9 +301,7 @@ describe('commentContent identity profile links', () => {
       })
     )
 
-    expect(body).toContain(
-      ':x: [bob](https://github.enterprise.example/bob)'
-    )
+    expect(body).toContain(':x: [bob](https://github.enterprise.example/bob)')
     expect(body).not.toContain('https://github.com/bob')
   })
 
