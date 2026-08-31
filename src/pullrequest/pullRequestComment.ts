@@ -50,15 +50,13 @@ export async function preparePrComment(
   const signed = committerMap?.notSigned && committerMap?.notSigned.length === 0
 
   try {
-    const claBotComment = await getComment(preloadedComments)
-    if (!claBotComment) {
-      return {
-        reactedCommitters: undefined,
-        apply: () =>
-          applyCommentOperation(() => createComment(signed, committerMap))
-      }
-    }
-    if (!Number.isSafeInteger(claBotComment.id) || claBotComment.id <= 0) {
+    const comments =
+      preloadedComments ?? (await listBoundedPullRequestComments())
+    const claBotComment = await getComment(comments)
+    if (
+      claBotComment &&
+      (!Number.isSafeInteger(claBotComment.id) || claBotComment.id <= 0)
+    ) {
       throw new Error('The trusted CLA bot comment has an invalid ID')
     }
 
@@ -67,7 +65,7 @@ export async function preparePrComment(
     const reactedCommitters = await signatureWithPRComment(
       committerMap,
       committers,
-      preloadedComments
+      comments
     )
     if (reactedCommitters?.onlyCommitters) {
       reactedCommitters.allSignedFlag = prepareAllSignedCommitters(
@@ -81,12 +79,20 @@ export async function preparePrComment(
       reactedCommitters,
       apply: () =>
         applyCommentOperation(async () => {
+          committerMap = prepareCommiterMap(committerMap, reactedCommitters)
+          if (!claBotComment) {
+            await createComment(
+              signed || reactedCommitters.allSignedFlag,
+              committerMap
+            )
+            return
+          }
+
           // Keep the existing two-update behavior when the stored ledger
           // already says everyone signed. Both writes are deferred together.
           if (signed) {
             await updateComment(signed, committerMap, claBotComment)
           }
-          committerMap = prepareCommiterMap(committerMap, reactedCommitters)
           await updateComment(
             reactedCommitters.allSignedFlag,
             committerMap,
@@ -152,10 +158,8 @@ async function updateComment(
     })
 }
 
-async function getComment(preloadedComments?: PullRequestComment[]) {
+async function getComment(comments: PullRequestComment[]) {
   try {
-    const comments =
-      preloadedComments ?? (await listBoundedPullRequestComments())
     const marker = getUseDcoFlag()
       ? /.*DCO Assistant Lite bot.*/m
       : /.*CLA Assistant Lite bot.*/m

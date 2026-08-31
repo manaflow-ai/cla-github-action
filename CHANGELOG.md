@@ -31,7 +31,8 @@ commit that introduced it.
 - Signature comments must contain only the exact declaration. Appended text,
   changed case or punctuation, quotations, and bot comments do not count.
 - Existing CLA marker comments are trusted only when GitHub confirms that the
-  canonical Actions bot wrote them.
+  canonical Actions bot wrote them. A spoofed marker cannot suppress a valid
+  signing comment from the same action run.
 - The action checks the live Pull Request state, opener, base repository ID,
   base branch, head repository ID, head branch, and head commit before
   signature work, before a ledger write, and before it reports success.

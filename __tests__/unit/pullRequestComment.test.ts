@@ -111,24 +111,20 @@ describe('prCommentSetup', () => {
 
   it('finds the existing bot comment by the "CLA Assistant Lite bot" marker and updates it', async () => {
     canonicalBotInterceptor(http)
-    listCommentsInterceptor(
-      http,
-      [
-        {
-          id: 1,
-          body: 'I agree to the CLA',
-          user: { login: 'someone', id: 5 },
-          created_at: '2024-01-01'
-        },
-        {
-          id: 777,
-          body: 'something **CLA Assistant Lite bot** says',
-          user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
-          created_at: '2024-01-02'
-        }
-      ],
-      2
-    )
+    listCommentsInterceptor(http, [
+      {
+        id: 1,
+        body: 'I agree to the CLA',
+        user: { login: 'someone', id: 5 },
+        created_at: '2024-01-01'
+      },
+      {
+        id: 777,
+        body: 'something **CLA Assistant Lite bot** says',
+        user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+        created_at: '2024-01-02'
+      }
+    ])
     http
       .github()
       .intercept({
@@ -158,24 +154,20 @@ describe('prCommentSetup', () => {
   it('finds the DCO bot comment when use-dco-flag is true', async () => {
     setDefaultInputs({ 'use-dco-flag': 'true' })
     canonicalBotInterceptor(http)
-    listCommentsInterceptor(
-      http,
-      [
-        {
-          id: 1,
-          body: 'unrelated',
-          user: { login: 'x', id: 2 },
-          created_at: '2024-01-01'
-        },
-        {
-          id: 555,
-          body: '**DCO Assistant Lite bot**: content',
-          user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
-          created_at: '2024-01-02'
-        }
-      ],
-      2
-    )
+    listCommentsInterceptor(http, [
+      {
+        id: 1,
+        body: 'unrelated',
+        user: { login: 'x', id: 2 },
+        created_at: '2024-01-01'
+      },
+      {
+        id: 555,
+        body: '**DCO Assistant Lite bot**: content',
+        user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+        created_at: '2024-01-02'
+      }
+    ])
     http
       .github()
       .intercept({
