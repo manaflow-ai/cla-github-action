@@ -62,6 +62,9 @@ commit that introduced it.
 - Merged Pull Request locks use GitHub's valid `resolved` reason. An omitted
   `required-base-ref` remains compatible but now emits a runtime warning that
   any base branch is accepted.
+- Git names and emails are rendered as escaped, inert text in bot comments.
+  Attacker-controlled commit metadata cannot inject Markdown blocks, links,
+  or account mentions.
 
 ### Changed
 

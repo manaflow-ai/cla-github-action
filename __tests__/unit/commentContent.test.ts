@@ -165,8 +165,8 @@ describe('commentContent (CLA mode)', () => {
       )
       expect(body).toContain('[!CAUTION]')
       expect(body).toContain('@alice')
-      expect(body).toContain('@bob')
-      expect(body).toContain('@carol')
+      expect(body).toContain('<code>bob</code>')
+      expect(body).toContain('<code>carol</code>')
       expect(body).toContain('Author/co-author identities')
       expect(body).toContain('require-opener-as-author')
     })
@@ -185,7 +185,7 @@ describe('commentContent (CLA mode)', () => {
       expect(body).toContain('[!NOTE]')
       expect(body).not.toContain('[!CAUTION]')
       expect(body).toContain('@alice')
-      expect(body).toContain('@bob')
+      expect(body).toContain('<code>bob</code>')
     })
 
     it('handles an empty author identity list gracefully', () => {
