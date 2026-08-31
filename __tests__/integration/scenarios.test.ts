@@ -1459,6 +1459,45 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('accepts 1000 one-author commits without an identity-cap false positive', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 35,
+      head: { sha: 'headsha', ref: 'feature/max-commits' },
+      user: { login: 'alice', id: 1001 },
+      commits: Array.from({ length: 1000 }, () => ({
+        author: { login: 'alice', id: 1001 }
+      }))
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: []
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 35,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 35,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).not.toMatch(
+      /more than .*git identity assertions/i
+    )
+    expect(fake.repo('acme', 'widgets').listComments(35)).toHaveLength(1)
+    watch.restore()
+  })
+
   it('fails closed when a pull request reports more than 1000 git identity assertions', async () => {
     const watch = watchCore()
     const commits = Array.from({ length: 11 }, (_, commitIndex) => ({
