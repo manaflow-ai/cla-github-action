@@ -98,6 +98,8 @@ export interface FaultInjection {
   status: number
   body?: string
   headers?: Record<string, string>
+  /** Let this many matching requests pass before returning the injected response. */
+  skip?: number
   times: number
 }
 
@@ -508,6 +510,10 @@ export function createFakeGitHubCore(): FakeGitHubCore {
         (!f.pathPattern.test(pathname) && !f.pathPattern.test(decoded))
       )
         continue
+      if ((f.skip ?? 0) > 0) {
+        f.skip = (f.skip ?? 0) - 1
+        continue
+      }
       f.times -= 1
       if (f.times <= 0) faults.splice(i, 1)
       return {

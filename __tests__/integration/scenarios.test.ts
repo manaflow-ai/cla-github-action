@@ -700,6 +700,106 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('does not let a committer-only identity satisfy the opener authorship guard', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 22,
+      head: { sha: 'headsha', ref: 'feature/forged-committer' },
+      user: { login: 'alice', id: 1001 },
+      commits: [
+        {
+          author: { login: 'bob', id: 2002 },
+          committer: { login: 'alice', id: 1001 }
+        }
+      ]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [
+        { name: 'alice', id: 1001 },
+        { name: 'bob', id: 2002 }
+      ]
+    })
+    fake.repo('acme', 'widgets').addComment(22, {
+      body: '**CLA Assistant Lite bot**: notice',
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
+    })
+    fake.repo('acme', 'widgets').addComment(22, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 22,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 22,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /Pull Request opener @alice is not recorded as an author or co-author/
+    )
+    const body = fake.repo('acme', 'widgets').listComments(22)[0]!.body
+    expect(body).toContain('[!CAUTION]')
+    watch.restore()
+  })
+
+  it('does not reuse a prior signature for a committer-only identity', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 25,
+      head: { sha: 'headsha', ref: 'feature/committer-signature' },
+      user: { login: 'alice', id: 1001 },
+      commits: [
+        {
+          author: { login: 'alice', id: 1001 },
+          committer: { login: 'bob', id: 2002 }
+        }
+      ]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [
+        { name: 'alice', id: 1001 },
+        { name: 'bob', id: 2002 }
+      ]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 25,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 25,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /Committers of Pull Request number 25/
+    )
+    const body = fake.repo('acme', 'widgets').listComments(25)[0]!.body
+    expect(body).toContain(':x: @bob')
+    watch.restore()
+  })
+
   it('does not silently remove a GitHub Actions bot commit identity', async () => {
     const watch = watchCore()
     setInput('require-opener-as-author', 'false')
@@ -870,6 +970,54 @@ describe('CLA action end-to-end scenarios', () => {
     expect(fake.repo('acme', 'widgets').listComments(24)[0]!.body).toMatch(
       /all contributors have signed the cla/i
     )
+    watch.restore()
+  })
+
+  it('revalidates the live Pull Request immediately before a success result', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 27,
+      head: { sha: 'headsha', ref: 'feature/retarget-during-check' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    fake.injectFailure({
+      method: 'GET',
+      pathPattern: /\/repos\/acme\/widgets\/pulls\/27$/,
+      skip: 1,
+      times: 1,
+      status: 200,
+      body: JSON.stringify({
+        number: 27,
+        state: 'open',
+        head: { sha: 'headsha', ref: 'feature/retarget-during-check' },
+        base: { ref: 'release', repo: { full_name: 'acme/widgets' } },
+        user: { login: 'alice', id: 1001 }
+      })
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 27,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 27,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/base branch.*main/i)
     watch.restore()
   })
 })
