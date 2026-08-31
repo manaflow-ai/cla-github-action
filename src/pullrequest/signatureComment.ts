@@ -37,6 +37,8 @@ export default async function signatureWithPRComment(
     })
   }
   for (const comment of listOfPRComments) {
+    // SigningComment.id is the commenter account ID copied above. The REST
+    // Pull Request comment ID is kept separately as comment_id.
     if (
       isUneditedComment(comment.created_at, comment.updated_at) &&
       isCommentSignedByUser(
