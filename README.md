@@ -81,7 +81,7 @@ jobs:
     # Serialize runs for one Pull Request. The action uses a bounded merge
     # retry when separate Pull Requests update the shared ledger together.
     concurrency:
-      group: cla-signatures-${{ github.repository_id }}-${{ github.event.pull_request.number || github.event.issue.number }}
+      group: cla-signatures-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}
       # Keep cancellation disabled. GitHub retains one running and one
       # pending run for this group. CLACommentGate rejects case variants and
       # arbitrary comments before this privileged queue.
@@ -89,7 +89,7 @@ jobs:
     steps:
       - name: "CLA Assistant v2"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@056a0e9d7237954489ab474f24e66c2e742e78f9
+        uses: manaflow-ai/cla-github-action@bc206ed9b52ad0b0cbe85244ce522e5e9b65c10e
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only set this token for a remote signature repository. Prefer a
@@ -174,7 +174,7 @@ The action re-fetches accepted signing comments immediately before a ledger writ
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: manaflow-ai/cla-github-action@056a0e9d7237954489ab474f24e66c2e742e78f9
+> uses: manaflow-ai/cla-github-action@bc206ed9b52ad0b0cbe85244ce522e5e9b65c10e
 > ```
 >
 > Tools like [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
@@ -219,7 +219,7 @@ After the contributor signed a CLA, the contributor's signature with metadata wi
 
 Protect the signature ledger from normal collaborator writes. Use a repository ruleset that permits only the trusted CLA automation identity, or store the ledger in a private repository where only that identity can write. The action token or configured App/PAT must have permission to update the protected target.
 
-If you split merged-pull-request locking into another job, use the same `cla-signatures-${{ github.repository_id }}-${{ github.event.pull_request.number || github.event.issue.number }}` group and set `cancel-in-progress: false`. The lock and signature jobs for one Pull Request must not run together.
+If you split merged-pull-request locking into another job, use the same `cla-signatures-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}` group and set `cancel-in-progress: false`. The lock and signature jobs for one Pull Request must not run together.
 
 Ledger entries do not contain a CLA document hash or terms version. If the CLA text changes, use a new ledger path and signing declaration, and require contributors to sign again. Without this policy, an old ledger entry cannot prove which document version the contributor accepted.
 
