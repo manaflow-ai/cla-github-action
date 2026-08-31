@@ -48573,9 +48573,9 @@ async function listBoundedPullRequestComments() {
 
 
 
-async function signatureWithPRComment(committerMap, committers) {
+async function signatureWithPRComment(committerMap, committers, preloadedComments) {
     const repoId = github_context.payload.repository?.id;
-    const allComments = await listBoundedPullRequestComments();
+    const allComments = preloadedComments ?? (await listBoundedPullRequestComments());
     const listOfPRComments = [];
     const filteredListOfPRComments = [];
     for (const prComment of allComments) {
@@ -48593,7 +48593,7 @@ async function signatureWithPRComment(committerMap, committers) {
         });
     }
     for (const comment of listOfPRComments) {
-        if (isCommentSignedByUser(comment.body ?? '', comment.name, comment.actorType)) {
+        if (isCommentSignedByUser(comment.body ?? '', comment.name, comment.actorType, comment.id)) {
             const { body: _, actorType: __, ...withoutBody } = comment;
             filteredListOfPRComments.push(withoutBody);
         }
@@ -48613,8 +48613,10 @@ async function signatureWithPRComment(committerMap, committers) {
     };
     return commentedCommitterMap;
 }
-function isCommentSignedByUser(comment, commentAuthor, actorType) {
-    if (actorType === 'Bot' ||
+function isCommentSignedByUser(comment, commentAuthor, actorType, commentAuthorId) {
+    if (actorType !== 'User' ||
+        !Number.isSafeInteger(commentAuthorId) ||
+        (commentAuthorId ?? 0) <= 0 ||
         commentAuthor.toLowerCase() === 'github-actions[bot]' ||
         commentAuthor.toLowerCase().endsWith('[bot]')) {
         return false;
@@ -48706,13 +48708,13 @@ function botSignature(mode) {
 function renderOpenerMismatchBlock(mismatch) {
     const authorList = mismatch.commitAuthors.length > 0
         ? mismatch.commitAuthors.map(a => `@${a}`).join(', ')
-        : '*(no commit authors could be identified)*';
+        : '*(no author or co-author identities could be identified)*';
     if (mismatch.hardFail) {
         return `> [!CAUTION]
 > **Pull Request opener is not an author or co-author of any commit in this PR.**
 >
 > - Opener: @${mismatch.opener}
-> - Commit authors: ${authorList}
+> - Author/co-author identities: ${authorList}
 >
 > This check is blocked to guard against commits being submitted under a trusted identity the submitter does not control. If this PR is a legitimate cherry-pick, release-engineering submission, or mailing-list-style patch delivery, the repository maintainer can opt out of this check by setting \`require-opener-as-author: 'false'\` on the CLA-assistant step in the repository's workflow.
 
@@ -48779,10 +48781,10 @@ function renderUnlinkedCommitBlock(mode, unlinked) {
 
 
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
-async function prCommentSetup(committerMap, committers) {
+async function prCommentSetup(committerMap, committers, preloadedComments) {
     const signed = committerMap?.notSigned && committerMap?.notSigned.length === 0;
     try {
-        const claBotComment = await getComment();
+        const claBotComment = await getComment(preloadedComments);
         if (!claBotComment) {
             return createComment(signed, committerMap);
         }
@@ -48791,7 +48793,7 @@ async function prCommentSetup(committerMap, committers) {
                 await updateComment(signed, committerMap, claBotComment);
             }
             // reacted committers are contributors who have newly signed by posting the Pull Request comment
-            const reactedCommitters = await signatureWithPRComment(committerMap, committers);
+            const reactedCommitters = await signatureWithPRComment(committerMap, committers, preloadedComments);
             if (reactedCommitters?.onlyCommitters) {
                 reactedCommitters.allSignedFlag = prepareAllSignedCommitters(committerMap, reactedCommitters.onlyCommitters, committers);
             }
@@ -48828,9 +48830,9 @@ async function updateComment(signed, committerMap, claBotComment) {
         throw new Error(`Error occured when updating the pull request comment: ${errorMessage(error)}`);
     });
 }
-async function getComment() {
+async function getComment(preloadedComments) {
     try {
-        const comments = await listBoundedPullRequestComments();
+        const comments = preloadedComments ?? (await listBoundedPullRequestComments());
         const marker = getUseDcoFlag()
             ? /.*DCO Assistant Lite bot.*/m
             : /.*CLA Assistant Lite bot.*/m;
@@ -49091,20 +49093,24 @@ function validatePayloadAgainstLive(live, repository) {
 
 
 
+
 async function setupClaCheck() {
     const livePullRequest = await validateLivePullRequest();
+    // Bound all contributor-controlled comments before any ledger or comment
+    // write, then use the same snapshot throughout this action run.
+    const pullRequestComments = await listBoundedPullRequestComments();
     let committerMap = getInitialCommittersMap();
     const commitAuthors = await getCommitters();
     const openerMismatch = detectOpenerMismatch(commitAuthors, livePullRequest.opener);
     let committers = includePullRequestOpener(commitAuthors, livePullRequest.opener);
     committers = checkAllowList(committers);
-    const { claFileContent, sha } = (await getCLAFileContentandSHA(committers, committerMap, livePullRequest));
+    const { claFileContent, sha } = (await getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments));
     committerMap = setupClaCheck_prepareCommiterMap(committers, claFileContent);
     if (openerMismatch) {
         committerMap.openerMismatch = openerMismatch;
     }
     try {
-        const reactedCommitters = (await prCommentSetup(committerMap, committers));
+        const reactedCommitters = (await prCommentSetup(committerMap, committers, pullRequestComments));
         if (reactedCommitters?.newSigned.length) {
             /* pushing the recently signed  contributors to the CLA Json File */
             await validateLivePullRequest(livePullRequest);
@@ -49132,14 +49138,14 @@ async function setupClaCheck() {
         setFailed(`Could not update the JSON file: ${errorMessage(err)}`);
     }
 }
-async function getCLAFileContentandSHA(committers, committerMap, livePullRequest) {
+async function getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments) {
     let result, claFileContentString, claFileContent, sha;
     try {
         result = await getFileContent();
     }
     catch (error) {
         if (errorStatus(error) === 404) {
-            return createClaFileAndPRComment(committers, committerMap, livePullRequest);
+            return createClaFileAndPRComment(committers, committerMap, livePullRequest, pullRequestComments);
         }
         else {
             throw new Error(`Could not retrieve repository contents. Status: ${errorStatus(error) ?? 'unknown'}`);
@@ -49198,7 +49204,7 @@ function isValidSignature(value) {
         Number.isSafeInteger(candidate.id) &&
         candidate.id > 0);
 }
-async function createClaFileAndPRComment(committers, committerMap, livePullRequest) {
+async function createClaFileAndPRComment(committers, committerMap, livePullRequest, pullRequestComments) {
     committerMap.notSigned = committers;
     committerMap.signed = [];
     committers.map(committer => {
@@ -49211,7 +49217,7 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
     const initialContentBinary = Buffer.from(initialContentString).toString('base64');
     await validateLivePullRequest(livePullRequest);
     await createFile(initialContentBinary).catch((error) => setFailed(`Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`));
-    await prCommentSetup(committerMap, committers);
+    await prCommentSetup(committerMap, committers, pullRequestComments);
     throw new Error(`Committers of pull request ${github_context.issue.number} have to sign the CLA`);
 }
 function setupClaCheck_prepareCommiterMap(committers, claFileContent) {

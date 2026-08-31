@@ -62,13 +62,17 @@ describe('isCommentSignedByUser', () => {
   afterEach(resetEnv)
 
   it('rejects every GitHub Bot actor type', () => {
-    expect(isCommentSignedByUser(CLA, 'renovate[bot]', 'Bot')).toBe(false)
-    expect(isCommentSignedByUser(CLA, 'github-actions[bot]', 'Bot')).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'renovate[bot]', 'Bot', 1001)).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'github-actions[bot]', 'Bot', 1001)).toBe(
+      false
+    )
   })
 
   it('rejects a bot-suffixed login even when actor type is missing or wrong', () => {
-    expect(isCommentSignedByUser(CLA, 'example[bot]')).toBe(false)
-    expect(isCommentSignedByUser(CLA, 'example[bot]', 'User')).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'example[bot]', undefined, 1001)).toBe(
+      false
+    )
+    expect(isCommentSignedByUser(CLA, 'example[bot]', 'User', 1001)).toBe(false)
   })
 
   it('requires a GitHub User actor type and a positive safe integer ID', () => {
@@ -86,23 +90,23 @@ describe('isCommentSignedByUser', () => {
   })
 
   it('uses the CLA phrase by default', () => {
-    expect(isCommentSignedByUser(CLA, 'alice', 'User')).toBe(true)
-    expect(isCommentSignedByUser(DCO, 'alice', 'User')).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'alice', 'User', 1001)).toBe(true)
+    expect(isCommentSignedByUser(DCO, 'alice', 'User', 1001)).toBe(false)
   })
 
   it('uses the DCO phrase when use-dco-flag is true', () => {
     setInput('use-dco-flag', 'true')
-    expect(isCommentSignedByUser(DCO, 'alice', 'User')).toBe(true)
-    expect(isCommentSignedByUser(CLA, 'alice', 'User')).toBe(false)
+    expect(isCommentSignedByUser(DCO, 'alice', 'User', 1001)).toBe(true)
+    expect(isCommentSignedByUser(CLA, 'alice', 'User', 1001)).toBe(false)
   })
 
   it('uses the custom phrase when configured', () => {
     setInput('custom-pr-sign-comment', 'I accept the terms')
-    expect(isCommentSignedByUser('I accept the terms', 'alice', 'User')).toBe(
-      true
-    )
-    expect(isCommentSignedByUser('I accept the terms.', 'alice', 'User')).toBe(
-      false
-    )
+    expect(
+      isCommentSignedByUser('I accept the terms', 'alice', 'User', 1001)
+    ).toBe(true)
+    expect(
+      isCommentSignedByUser('I accept the terms.', 'alice', 'User', 1001)
+    ).toBe(false)
   })
 })

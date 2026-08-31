@@ -2,7 +2,7 @@ import { context } from '@actions/github'
 import { octokit } from '../octokit'
 import { MAX_PULL_REQUEST_COMMENTS } from '../shared/limits'
 
-type PullRequestComment = Awaited<
+export type PullRequestComment = Awaited<
   ReturnType<typeof octokit.rest.issues.listComments>
 >['data'][number]
 

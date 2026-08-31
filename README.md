@@ -74,12 +74,15 @@ jobs:
           #signed-commit-message: 'For example: $contributorName has signed the CLA in $owner/$repo#$pullRequestNo'
           #custom-notsigned-prcomment: 'pull request comment with Introductory message to ask new contributors to sign'
           #custom-pr-sign-comment: 'The signature to be committed in order to sign the CLA'
+          # If set, replace the default declaration in the job `if` guard with this exact text.
           #custom-allsigned-prcomment: 'pull request comment when all contributors has signed, defaults to **CLA Assistant Lite bot** All Contributors have signed the CLA.'
           #lock-pullrequest-aftermerge: false - if you don't want this bot to automatically lock the pull request after merging (default - true)
           #use-dco-flag: true - If you are using DCO instead of CLA
           #require-opener-as-author: false - if your workflow involves submitters legitimately opening PRs containing only commits authored by others (cherry-picks, release engineering). Default is true.
 
 ```
+
+The job `if` guard must use the same exact signing declaration as the action. If you set `custom-pr-sign-comment`, replace the default CLA declaration in the guard with that custom text. If you set `use-dco-flag: true`, replace it with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the guard to run privileged code for every issue comment.
 
 > [!IMPORTANT]
 > **Pinning by commit SHA**
@@ -137,7 +140,7 @@ The action fails closed when a Pull Request has more than 1,000 commits, more th
 
 #### 3. Signing the CLA
 
-CLA workflow creates a comment on Pull Request asking contributors who have not signed  CLA to sign and also fails the pull request status check with a `failure`. Contributors must post a new comment with **"I have read the CLA Document and I hereby sign the CLA"** as the full Pull Request comment body. Surrounding whitespace and blank lines are ignored. Case, wording, punctuation, and internal whitespace must match. An edited comment does not trigger the workflow. Put `recheck` in a separate new comment.
+CLA workflow creates a comment on Pull Request asking contributors who have not signed  CLA to sign and also fails the pull request status check with a `failure`. Contributors must post a new comment with **"I have read the CLA Document and I hereby sign the CLA"** as the full Pull Request comment body. Surrounding whitespace and blank lines are ignored. Case, wording, punctuation, and internal whitespace must match. An edited comment does not trigger the workflow. Put `recheck` in a separate new comment. Only a comment author that GitHub identifies as a `User` with a positive numeric account ID can sign. Bot, organization, mannequin, missing-type, and invalid-ID actors fail closed.
 If the contributor has already signed the CLA, then the PR status will pass with `success`. <br/>
 
 This action does not rerun an earlier workflow after it records a signature. Repositories that need an immediate required-check update must use a separate trusted job. That job must bind the rerun to the current Pull Request number, head commit SHA, workflow file, and base branch before it calls the Actions rerun API.

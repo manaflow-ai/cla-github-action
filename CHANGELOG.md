@@ -56,6 +56,9 @@ commit that introduced it.
 - GitHub API failures fail the current run without automatic request replay.
   This prevents an ambiguous lost response from creating duplicate comments
   or ledger writes. Operators can rerun the failed workflow after recovery.
+- The action bounds and snapshots Pull Request comments before any ledger or
+  comment write. Only a GitHub `User` actor with a positive account ID can
+  create a signature.
 
 ### Changed
 

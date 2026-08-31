@@ -209,7 +209,7 @@ describe('error paths', () => {
         issue: { number: 7, pull_request: {} },
         comment: {
           body: 'I have read the CLA Document and I hereby sign the CLA',
-          user: { login: 'alice', id: 1001 }
+          user: { login: 'alice', id: 1001, type: 'User' }
         },
         repository: { id: fake.repo('acme', 'widgets').state.id }
       }

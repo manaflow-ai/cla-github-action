@@ -98,7 +98,7 @@ describe('CLA action end-to-end scenarios', () => {
     })
     fake.repo('acme', 'widgets').addComment(7, {
       body: 'I have read the CLA Document and I hereby sign the CLA',
-      user: { login: 'alice', id: 1001 }
+      user: { login: 'alice', id: 1001, type: 'User' }
     })
     fake.repo('acme', 'widgets').addWorkflow('cla-check', [
       {
@@ -121,7 +121,7 @@ describe('CLA action end-to-end scenarios', () => {
         issue: { number: 7, pull_request: {} },
         comment: {
           body: 'I have read the CLA Document and I hereby sign the CLA',
-          user: { login: 'alice', id: 1001 }
+          user: { login: 'alice', id: 1001, type: 'User' }
         },
         repository: { id: fake.repo('acme', 'widgets').state.id }
       }

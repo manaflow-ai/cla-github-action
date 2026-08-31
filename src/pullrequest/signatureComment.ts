@@ -6,14 +6,19 @@ import {
   SigningComment
 } from '../interfaces'
 import { getPrSignComment } from '../shared/pr-sign-comment'
-import { listBoundedPullRequestComments } from './pullRequestComments'
+import {
+  listBoundedPullRequestComments,
+  PullRequestComment
+} from './pullRequestComments'
 
 export default async function signatureWithPRComment(
   committerMap: CommitterMap,
-  committers: Committer[]
+  committers: Committer[],
+  preloadedComments?: PullRequestComment[]
 ): Promise<ReactedCommitterMap> {
   const repoId = context.payload.repository?.id
-  const allComments = await listBoundedPullRequestComments()
+  const allComments =
+    preloadedComments ?? (await listBoundedPullRequestComments())
   const listOfPRComments: SigningComment[] = []
   const filteredListOfPRComments: SigningComment[] = []
 
@@ -32,7 +37,12 @@ export default async function signatureWithPRComment(
   }
   for (const comment of listOfPRComments) {
     if (
-      isCommentSignedByUser(comment.body ?? '', comment.name, comment.actorType)
+      isCommentSignedByUser(
+        comment.body ?? '',
+        comment.name,
+        comment.actorType,
+        comment.id
+      )
     ) {
       const { body: _, actorType: __, ...withoutBody } = comment
       filteredListOfPRComments.push(withoutBody)
@@ -67,10 +77,13 @@ export default async function signatureWithPRComment(
 export function isCommentSignedByUser(
   comment: string,
   commentAuthor: string,
-  actorType?: string
+  actorType?: string,
+  commentAuthorId?: number
 ): boolean {
   if (
-    actorType === 'Bot' ||
+    actorType !== 'User' ||
+    !Number.isSafeInteger(commentAuthorId) ||
+    (commentAuthorId ?? 0) <= 0 ||
     commentAuthor.toLowerCase() === 'github-actions[bot]' ||
     commentAuthor.toLowerCase().endsWith('[bot]')
   ) {

@@ -119,7 +119,7 @@ describe('commentContent (CLA mode)', () => {
   })
 
   describe('opener-mismatch block', () => {
-    it('renders a CAUTION block naming opener + commit authors when hardFail is true', () => {
+    it('renders a CAUTION block naming opener + author identities when hardFail is true', () => {
       const body = commentContent(
         true,
         committerMap({
@@ -134,6 +134,7 @@ describe('commentContent (CLA mode)', () => {
       expect(body).toContain('@alice')
       expect(body).toContain('@bob')
       expect(body).toContain('@carol')
+      expect(body).toContain('Author/co-author identities')
       expect(body).toContain('require-opener-as-author')
     })
 
@@ -154,7 +155,7 @@ describe('commentContent (CLA mode)', () => {
       expect(body).toContain('@bob')
     })
 
-    it('handles an empty commit-author list gracefully', () => {
+    it('handles an empty author identity list gracefully', () => {
       const body = commentContent(
         true,
         committerMap({
@@ -166,7 +167,9 @@ describe('commentContent (CLA mode)', () => {
         })
       )
       expect(body).toContain('[!CAUTION]')
-      expect(body).toContain('no commit authors could be identified')
+      expect(body).toContain(
+        'no author or co-author identities could be identified'
+      )
     })
   })
 

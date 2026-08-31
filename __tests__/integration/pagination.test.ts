@@ -48,7 +48,7 @@ describe('pagination', () => {
     // Insert the sign phrase at index 140 — unreachable without pagination.
     fake.repo('acme', 'widgets').addComment(7, {
       body: 'I have read the CLA Document and I hereby sign the CLA',
-      user: { login: 'alice', id: 1001 }
+      user: { login: 'alice', id: 1001, type: 'User' }
     })
 
     const signatureWithPRComment = loadSignatureComment()

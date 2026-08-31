@@ -23,9 +23,16 @@ import {
   validateLivePullRequest
 } from './livePullRequest'
 import { MAX_LEDGER_BYTES, MAX_LEDGER_SIGNATURES } from './shared/limits'
+import {
+  listBoundedPullRequestComments,
+  PullRequestComment
+} from './pullrequest/pullRequestComments'
 
 export async function setupClaCheck() {
   const livePullRequest = await validateLivePullRequest()
+  // Bound all contributor-controlled comments before any ledger or comment
+  // write, then use the same snapshot throughout this action run.
+  const pullRequestComments = await listBoundedPullRequestComments()
   let committerMap = getInitialCommittersMap()
 
   const commitAuthors = await getCommitters()
@@ -42,7 +49,8 @@ export async function setupClaCheck() {
   const { claFileContent, sha } = (await getCLAFileContentandSHA(
     committers,
     committerMap,
-    livePullRequest
+    livePullRequest,
+    pullRequestComments
   )) as ClafileContentAndSha
 
   committerMap = prepareCommiterMap(committers, claFileContent) as CommitterMap
@@ -53,7 +61,8 @@ export async function setupClaCheck() {
   try {
     const reactedCommitters = (await prCommentSetup(
       committerMap,
-      committers
+      committers,
+      pullRequestComments
     )) as ReactedCommitterMap
 
     if (reactedCommitters?.newSigned.length) {
@@ -91,7 +100,8 @@ export async function setupClaCheck() {
 async function getCLAFileContentandSHA(
   committers: Committer[],
   committerMap: CommitterMap,
-  livePullRequest: LivePullRequestSnapshot
+  livePullRequest: LivePullRequestSnapshot,
+  pullRequestComments: PullRequestComment[]
 ): Promise<void | ClafileContentAndSha> {
   let result, claFileContentString, claFileContent, sha
   try {
@@ -101,7 +111,8 @@ async function getCLAFileContentandSHA(
       return createClaFileAndPRComment(
         committers,
         committerMap,
-        livePullRequest
+        livePullRequest,
+        pullRequestComments
       )
     } else {
       throw new Error(
@@ -183,7 +194,8 @@ function isValidSignature(value: unknown): value is Signature {
 async function createClaFileAndPRComment(
   committers: Committer[],
   committerMap: CommitterMap,
-  livePullRequest: LivePullRequestSnapshot
+  livePullRequest: LivePullRequestSnapshot,
+  pullRequestComments: PullRequestComment[]
 ): Promise<void> {
   committerMap.notSigned = committers
   committerMap.signed = []
@@ -204,7 +216,7 @@ async function createClaFileAndPRComment(
       `Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`
     )
   )
-  await prCommentSetup(committerMap, committers)
+  await prCommentSetup(committerMap, committers, pullRequestComments)
   throw new Error(
     `Committers of pull request ${context.issue.number} have to sign the CLA`
   )

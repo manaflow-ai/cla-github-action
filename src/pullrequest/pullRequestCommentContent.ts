@@ -100,14 +100,14 @@ function renderOpenerMismatchBlock(mismatch: {
   const authorList =
     mismatch.commitAuthors.length > 0
       ? mismatch.commitAuthors.map(a => `@${a}`).join(', ')
-      : '*(no commit authors could be identified)*'
+      : '*(no author or co-author identities could be identified)*'
 
   if (mismatch.hardFail) {
     return `> [!CAUTION]
 > **Pull Request opener is not an author or co-author of any commit in this PR.**
 >
 > - Opener: @${mismatch.opener}
-> - Commit authors: ${authorList}
+> - Author/co-author identities: ${authorList}
 >
 > This check is blocked to guard against commits being submitted under a trusted identity the submitter does not control. If this PR is a legitimate cherry-pick, release-engineering submission, or mailing-list-style patch delivery, the repository maintainer can opt out of this check by setting \`require-opener-as-author: 'false'\` on the CLA-assistant step in the repository's workflow.
 

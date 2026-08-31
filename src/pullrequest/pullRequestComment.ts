@@ -8,6 +8,7 @@ import { errorMessage } from '../shared/errors'
 import * as core from '@actions/core'
 import {
   listBoundedPullRequestComments,
+  PullRequestComment,
   PullRequestCommentLimitError
 } from './pullRequestComments'
 
@@ -15,12 +16,13 @@ const ACTIONS_BOT_LOGIN = 'github-actions[bot]'
 
 export default async function prCommentSetup(
   committerMap: CommitterMap,
-  committers: Committer[]
+  committers: Committer[],
+  preloadedComments?: PullRequestComment[]
 ) {
   const signed = committerMap?.notSigned && committerMap?.notSigned.length === 0
 
   try {
-    const claBotComment = await getComment()
+    const claBotComment = await getComment(preloadedComments)
     if (!claBotComment) {
       return createComment(signed, committerMap)
     } else if (claBotComment?.id) {
@@ -31,7 +33,8 @@ export default async function prCommentSetup(
       // reacted committers are contributors who have newly signed by posting the Pull Request comment
       const reactedCommitters = await signatureWithPRComment(
         committerMap,
-        committers
+        committers,
+        preloadedComments
       )
       if (reactedCommitters?.onlyCommitters) {
         reactedCommitters.allSignedFlag = prepareAllSignedCommitters(
@@ -92,9 +95,10 @@ async function updateComment(
     })
 }
 
-async function getComment() {
+async function getComment(preloadedComments?: PullRequestComment[]) {
   try {
-    const comments = await listBoundedPullRequestComments()
+    const comments =
+      preloadedComments ?? (await listBoundedPullRequestComments())
     const marker = getUseDcoFlag()
       ? /.*DCO Assistant Lite bot.*/m
       : /.*CLA Assistant Lite bot.*/m
