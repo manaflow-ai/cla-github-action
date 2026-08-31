@@ -77,6 +77,14 @@ describe('Pull request event', () => {
     expect(mockedLockPullRequest).toHaveBeenCalled()
   })
 
+  test('a failed lock request is reported through the action failure channel', async () => {
+    mockedLockPullRequest.mockRejectedValueOnce(new Error('lock request failed'))
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith('lock request failed')
+  })
+
   test('a failed merged Pull Request validation prevents locking', async () => {
     mockedValidateMergedPullRequestForLock.mockRejectedValueOnce(
       new Error('live identity mismatch')
