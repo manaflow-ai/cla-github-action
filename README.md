@@ -39,28 +39,18 @@ on:
 permissions: {}
 
 jobs:
-  CLAAssistant:
+  CLACommentGate:
     if: >-
-      (github.event_name == 'pull_request_target') ||
-      (github.event.issue.state == 'open' && github.event.issue.pull_request &&
+      github.event_name == 'issue_comment' &&
+      github.event.issue.state == 'open' && github.event.issue.pull_request &&
       (github.event.comment.body == 'recheck' ||
-      github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
+      github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA')
+    name: "CLA Comment Gate"
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # this can be read if signatures are in a remote repository
-      issues: write
-      pull-requests: write
-    # Serialize runs for one Pull Request. The action uses a bounded merge
-    # retry when separate Pull Requests update the shared ledger together.
-    concurrency:
-      group: cla-signatures-${{ github.repository_id }}-${{ github.event.pull_request.number || github.event.issue.number }}
-      # Keep cancellation disabled. GitHub retains one running and one
-      # pending run for this group; a separate admission gate should reject
-      # arbitrary comments before this queue.
-      cancel-in-progress: false
+    timeout-minutes: 2
+    permissions: {}
     steps:
       - name: "Validate exact CLA comment"
-        if: github.event_name == 'issue_comment'
         shell: bash
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
@@ -70,9 +60,33 @@ jobs:
             echo "::error::Comment must match the recheck command or signing declaration exactly."
             exit 1
           fi
+
+  CLAAssistant:
+    name: "CLA Assistant v2"
+    needs: CLACommentGate
+    if: >-
+      always() &&
+      ((github.event_name == 'pull_request_target') ||
+      (github.event_name == 'issue_comment' &&
+      needs.CLACommentGate.result == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # this can be read if signatures are in a remote repository
+      issues: write
+      pull-requests: write
+    # Serialize runs for one Pull Request. The action uses a bounded merge
+    # retry when separate Pull Requests update the shared ledger together.
+    concurrency:
+      group: cla-signatures-${{ github.repository_id }}-${{ github.event.pull_request.number || github.event.issue.number }}
+      # Keep cancellation disabled. GitHub retains one running and one
+      # pending run for this group. CLACommentGate rejects case variants and
+      # arbitrary comments before this privileged queue.
+      cancel-in-progress: false
+    steps:
       - name: "CLA Assistant v2"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@c327a6f4071730000bf03f9f85c87d30e1fe8084
+        uses: manaflow-ai/cla-github-action@0c62b450dc02c9d71c407bcd354b7f9befe919cf
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only set this token for a remote signature repository. Prefer a
@@ -107,7 +121,7 @@ jobs:
 
 Replace `<REPLACE_WITH_CLA_URL>` with the non-empty absolute HTTPS URL of the CLA or DCO. The action rejects an empty, relative, or non-HTTPS value before it makes a GitHub write.
 
-The job `if` guard must use the same signing declaration as the action, but GitHub expression equality is case-insensitive. The `Validate exact CLA comment` shell step provides the required case-sensitive comparison before the action runs. If you set `custom-pr-sign-comment`, replace the default declaration in the job guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the guard to run privileged code for every issue comment.
+The `CLACommentGate` job has no write permission and no concurrency group. Its `if` guard filters most comments, but GitHub expression equality is case-insensitive. The shell step supplies the required case-sensitive comparison. The privileged `CLAAssistant` job enters its concurrency group only after this gate succeeds. If you set `custom-pr-sign-comment`, replace the default declaration in the gate `if` guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the signer job to run for every issue comment.
 
 The shell step and the action compare the raw comment body and do not trim whitespace. Contributors must post the declaration with no leading or trailing whitespace for it to count as an electronic signature. Keep the `pull_request_target.branches` filter and `required-base-ref` input set to the same protected branch. The event filter avoids unnecessary runs; the action input revalidates the live base branch before a write or lock.
 
@@ -120,6 +134,8 @@ The action exposes `signature_recorded=true` only after it persists a new signat
 The action publishes an all-signed bot comment only after it revalidates the signing comments and persists any new signatures. If a signer edits or deletes the declaration during the run, the ledger and the previous trusted bot status stay unchanged.
 
 If the signature ledger does not exist, the first run creates an empty ledger and leaves any declaration from that run pending. Post a new `recheck` comment after the ledger exists. The action then validates and records the prior exact declaration before it publishes all-signed status.
+
+If two Pull Requests try to create the first ledger together, the losing run makes at most three safe reads. It continues only when a read confirms a valid ledger. Otherwise it fails closed. An unsigned contributor stays pending, and a valid signing declaration can reach all-signed status only after the confirmed ledger records it.
 
 The action re-fetches accepted signing comments immediately before a ledger write. It rejects a comment that was edited, deleted, or moved to another identity during the run. GitHub does not provide one transaction for comments and repository contents, so a short race remains between this final check and the ledger write.
 
@@ -153,7 +169,7 @@ The action re-fetches accepted signing comments immediately before a ledger writ
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: manaflow-ai/cla-github-action@c327a6f4071730000bf03f9f85c87d30e1fe8084
+> uses: manaflow-ai/cla-github-action@0c62b450dc02c9d71c407bcd354b7f9befe919cf
 > ```
 >
 > Tools like [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
