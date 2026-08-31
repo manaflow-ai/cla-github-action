@@ -49385,7 +49385,8 @@ async function run() {
             if (lockPullRequestAfterMerge() &&
                 github_context.payload.pull_request?.merged) {
                 await validateMergedPullRequestForLock();
-                return lockPullRequest();
+                await lockPullRequest();
+                return;
             }
             const reason = github_context.payload.pull_request?.merged
                 ? 'automatic locking is disabled'

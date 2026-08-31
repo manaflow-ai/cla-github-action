@@ -25,7 +25,8 @@ export async function run() {
         context.payload.pull_request?.merged
       ) {
         await validateMergedPullRequestForLock()
-        return lockPullRequest()
+        await lockPullRequest()
+        return
       }
       const reason = context.payload.pull_request?.merged
         ? 'automatic locking is disabled'
