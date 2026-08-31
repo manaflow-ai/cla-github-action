@@ -276,9 +276,7 @@ describe('bug fixes', () => {
       expect(repository.listComments(12)).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            body: expect.stringMatching(
-              /all contributors have signed the cla/i
-            )
+            body: expect.stringMatching(/all contributors have signed the cla/i)
           })
         ])
       )

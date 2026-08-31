@@ -7,3 +7,6 @@ export const MAX_LEDGER_BYTES = 1_000_000
 // Keep retries bounded so a persistent conflict cannot turn into a runner
 // hang or an unbounded API loop.
 export const MAX_LEDGER_WRITE_ATTEMPTS = 3
+// A first-file create can lose a race with another Pull Request. Retry only
+// the safe read that confirms the other run created a valid ledger.
+export const MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS = 3

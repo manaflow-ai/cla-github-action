@@ -23,7 +23,11 @@ import {
   LivePullRequestSnapshot,
   validateLivePullRequest
 } from './livePullRequest'
-import { MAX_LEDGER_BYTES, MAX_LEDGER_SIGNATURES } from './shared/limits'
+import {
+  MAX_LEDGER_BYTES,
+  MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS,
+  MAX_LEDGER_SIGNATURES
+} from './shared/limits'
 import {
   listBoundedPullRequestComments,
   PullRequestComment
@@ -130,7 +134,7 @@ async function getCLAFileContentandSHA(
   livePullRequest: LivePullRequestSnapshot,
   pullRequestComments: PullRequestComment[]
 ): Promise<void | ClafileContentAndSha> {
-  let result, claFileContentString, claFileContent, sha
+  let result
   try {
     result = await getFileContent()
   } catch (error) {
@@ -147,8 +151,15 @@ async function getCLAFileContentandSHA(
       )
     }
   }
-  sha = result?.data?.sha
-  if (typeof result.data.content !== 'string') {
+  return parseClaFileResponse(result)
+}
+
+function parseClaFileResponse(result: any): ClafileContentAndSha {
+  const sha = result?.data?.sha
+  if (typeof sha !== 'string' || sha.length === 0) {
+    throw new Error('Invalid CLA signature ledger: file SHA is missing')
+  }
+  if (typeof result?.data?.content !== 'string') {
     throw new Error('Invalid CLA signature ledger: file content is missing')
   }
   const claFileContentBuffer = Buffer.from(result.data.content, 'base64')
@@ -157,8 +168,7 @@ async function getCLAFileContentandSHA(
       `Invalid CLA signature ledger: file is larger than ${MAX_LEDGER_BYTES} bytes`
     )
   }
-  claFileContentString = claFileContentBuffer.toString()
-  claFileContent = parseClaFileContent(claFileContentString)
+  const claFileContent = parseClaFileContent(claFileContentBuffer.toString())
   return { claFileContent, sha }
 }
 
@@ -223,7 +233,7 @@ async function createClaFileAndPRComment(
   committerMap: CommitterMap,
   livePullRequest: LivePullRequestSnapshot,
   pullRequestComments: PullRequestComment[]
-): Promise<void> {
+): Promise<void | ClafileContentAndSha> {
   committerMap.notSigned = committers
   committerMap.signed = []
   committers.map(committer => {
@@ -241,6 +251,17 @@ async function createClaFileAndPRComment(
   try {
     await createFile(initialContentBinary)
   } catch (error) {
+    const recoveredLedger = await recoverConcurrentLedgerCreate(error)
+    if (recoveredLedger) {
+      // The other run won the create race. Continue through the normal
+      // signature path so this run cannot publish all-signed until any new
+      // declaration is validated and persisted in the confirmed ledger.
+      await validateLivePullRequest(livePullRequest)
+      core.warning(
+        'Another Pull Request created the CLA signature ledger concurrently. Continuing with the confirmed ledger.'
+      )
+      return recoveredLedger
+    }
     throw new Error(
       `Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`
     )
@@ -254,6 +275,32 @@ async function createClaFileAndPRComment(
   throw new Error(
     `Committers of pull request ${context.issue.number} have to sign the CLA`
   )
+}
+
+async function recoverConcurrentLedgerCreate(
+  createError: unknown
+): Promise<ClafileContentAndSha | undefined> {
+  const status = errorStatus(createError)
+  if (status !== 409 && status !== 422) return undefined
+
+  for (
+    let attempt = 0;
+    attempt < MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS;
+    attempt += 1
+  ) {
+    let result
+    try {
+      result = await getFileContent()
+    } catch (readError) {
+      if (errorStatus(readError) === 404) continue
+      throw new Error(
+        `Could not verify the CLA signature ledger after a concurrent create. Status: ${errorStatus(readError) ?? 'unknown'}`
+      )
+    }
+    return parseClaFileResponse(result)
+  }
+
+  return undefined
 }
 
 function prepareCommiterMap(

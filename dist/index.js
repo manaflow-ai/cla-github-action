@@ -48435,6 +48435,9 @@ const MAX_LEDGER_BYTES = 1_000_000;
 // Keep retries bounded so a persistent conflict cannot turn into a runner
 // hang or an unbounded API loop.
 const MAX_LEDGER_WRITE_ATTEMPTS = 3;
+// A first-file create can lose a race with another Pull Request. Retry only
+// the safe read that confirms the other run created a valid ledger.
+const MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS = 3;
 
 ;// CONCATENATED MODULE: ./src/persistence/persistence.ts
 
@@ -49373,7 +49376,7 @@ async function setupClaCheck() {
     }
 }
 async function getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments) {
-    let result, claFileContentString, claFileContent, sha;
+    let result;
     try {
         result = await getFileContent();
     }
@@ -49385,16 +49388,21 @@ async function getCLAFileContentandSHA(committers, committerMap, livePullRequest
             throw new Error(`Could not retrieve repository contents. Status: ${errorStatus(error) ?? 'unknown'}`);
         }
     }
-    sha = result?.data?.sha;
-    if (typeof result.data.content !== 'string') {
+    return parseClaFileResponse(result);
+}
+function parseClaFileResponse(result) {
+    const sha = result?.data?.sha;
+    if (typeof sha !== 'string' || sha.length === 0) {
+        throw new Error('Invalid CLA signature ledger: file SHA is missing');
+    }
+    if (typeof result?.data?.content !== 'string') {
         throw new Error('Invalid CLA signature ledger: file content is missing');
     }
     const claFileContentBuffer = Buffer.from(result.data.content, 'base64');
     if (claFileContentBuffer.byteLength > MAX_LEDGER_BYTES) {
         throw new Error(`Invalid CLA signature ledger: file is larger than ${MAX_LEDGER_BYTES} bytes`);
     }
-    claFileContentString = claFileContentBuffer.toString();
-    claFileContent = parseClaFileContent(claFileContentString);
+    const claFileContent = parseClaFileContent(claFileContentBuffer.toString());
     return { claFileContent, sha };
 }
 function parseClaFileContent(raw) {
@@ -49454,6 +49462,15 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
         await createFile(initialContentBinary);
     }
     catch (error) {
+        const recoveredLedger = await recoverConcurrentLedgerCreate(error);
+        if (recoveredLedger) {
+            // The other run won the create race. Continue through the normal
+            // signature path so this run cannot publish all-signed until any new
+            // declaration is validated and persisted in the confirmed ledger.
+            await validateLivePullRequest(livePullRequest);
+            warning('Another Pull Request created the CLA signature ledger concurrently. Continuing with the confirmed ledger.');
+            return recoveredLedger;
+        }
         throw new Error(`Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`);
     }
     await validateLivePullRequest(livePullRequest);
@@ -49464,6 +49481,24 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
     if (committers.length === 0)
         return;
     throw new Error(`Committers of pull request ${github_context.issue.number} have to sign the CLA`);
+}
+async function recoverConcurrentLedgerCreate(createError) {
+    const status = errorStatus(createError);
+    if (status !== 409 && status !== 422)
+        return undefined;
+    for (let attempt = 0; attempt < MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS; attempt += 1) {
+        let result;
+        try {
+            result = await getFileContent();
+        }
+        catch (readError) {
+            if (errorStatus(readError) === 404)
+                continue;
+            throw new Error(`Could not verify the CLA signature ledger after a concurrent create. Status: ${errorStatus(readError) ?? 'unknown'}`);
+        }
+        return parseClaFileResponse(result);
+    }
+    return undefined;
 }
 function setupClaCheck_prepareCommiterMap(committers, claFileContent) {
     let committerMap = getInitialCommittersMap();

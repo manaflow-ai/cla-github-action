@@ -83,6 +83,9 @@ commit that introduced it.
 - If an authenticated allowlisted opener is the only contributor on the first
   Pull Request, ledger creation completes successfully without requesting a
   signature.
+- When two Pull Requests create the first ledger together, a 409 or 422 create
+  response starts at most three safe reads. The action continues only after it
+  confirms a valid ledger. Other create failures still fail closed.
 
 ### Changed
 
