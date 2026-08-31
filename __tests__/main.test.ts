@@ -123,11 +123,12 @@ describe('Pull request event', () => {
     expect(mockedGetClas).toHaveBeenCalled()
   })
 
-  test('the checkcla method should be called on a merged/closed pull request if lock-pullrequest-aftermerge is disabled', async () => {
+  test('a closed event does no CLA work when automatic locking is disabled', async () => {
     mockedCoreGetInput.mockImplementation(() => 'false')
     await run()
     expect(mockedLockPullRequest).not.toHaveBeenCalled()
-    expect(mockedGetClas).toHaveBeenCalled()
+    expect(mockedValidateMergedPullRequestForLock).not.toHaveBeenCalled()
+    expect(mockedGetClas).not.toHaveBeenCalled()
   })
 
   test('an issue_comment event without a pull_request payload runs the CLA check without locking or unlocking', async () => {

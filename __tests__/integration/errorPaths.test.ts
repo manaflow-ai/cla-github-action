@@ -306,4 +306,41 @@ describe('error paths', () => {
     expect(fake.repo('acme', 'widgets').listComments(35)).toHaveLength(0)
     watch.restore()
   })
+
+  it('fails closed when the signature ledger is larger than 1000000 bytes', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 37,
+      head: { sha: 'headsha', ref: 'feature/large-ledger' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
+      signedContributors: [
+        { name: 'x'.repeat(1_000_001), id: 9999 }
+      ]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 37,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 37,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/larger than 1000000 bytes/i)
+    expect(fake.repo('acme', 'widgets').listComments(37)).toHaveLength(0)
+    watch.restore()
+  })
 })

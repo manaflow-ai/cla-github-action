@@ -203,5 +203,19 @@ describe('persistence', () => {
         { name: 'bob', id: 2 }
       ])
     })
+
+    it('rejects a serialized ledger larger than 1000000 bytes before writing', async () => {
+      const { updateFile } = loadPersistence()
+      await expect(
+        updateFile('oldsha', { signedContributors: [] }, {
+          newSigned: [{ name: 'x'.repeat(1_000_001), id: 2 }],
+          allSignedFlag: false,
+          signed: [],
+          notSigned: [],
+          unknown: []
+        } as any)
+      ).rejects.toThrow(/larger than 1000000 bytes/i)
+      http.assertClean()
+    })
   })
 })
