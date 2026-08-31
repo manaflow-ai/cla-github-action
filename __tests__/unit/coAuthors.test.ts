@@ -34,15 +34,14 @@ describe('parseCoAuthors', () => {
     expect(parseCoAuthors(msg)).toHaveLength(1)
   })
 
-  it('extracts login + numeric id from the modern noreply form', () => {
+  it('does not trust a numeric id embedded in a noreply trailer', () => {
     const msg =
       'Title\n\nCo-authored-by: Alice <12345+alice@users.noreply.github.com>'
     expect(parseCoAuthors(msg)).toEqual([
       {
         name: 'Alice',
         email: '12345+alice@users.noreply.github.com',
-        noreplyLogin: 'alice',
-        noreplyId: 12345
+        noreplyLogin: 'alice'
       }
     ])
   })

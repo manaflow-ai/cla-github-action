@@ -424,6 +424,55 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('does not accept a prior signature for an asserted co-author without a current sign comment', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 15,
+      head: { sha: 'headsha', ref: 'feature/forged-coauthor' },
+      commits: [
+        {
+          author: { login: 'alice', id: 1001 },
+          message:
+            'Implement thing\n\nCo-authored-by: Bob <2002+bob@users.noreply.github.com>'
+        }
+      ]
+    })
+    // Both identities have prior signatures. The co-author trailer is still
+    // only a claim, so Bob must sign this PR explicitly.
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [
+        { name: 'alice', id: 1001 },
+        { name: 'bob', id: 2002 }
+      ]
+    })
+
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 15,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 15,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /Committers of Pull Request number 15/
+    )
+    const body = fake.repo('acme', 'widgets').listComments(15)[0]!.body
+    expect(body).toContain(':x: @bob')
+    watch.restore()
+  })
+
   it('Co-authored-by trailer with a non-noreply email routes to the unlinked-email warning', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
