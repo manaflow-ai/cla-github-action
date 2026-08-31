@@ -148,7 +148,7 @@ The action re-fetches accepted signing comments immediately before a ledger writ
 > ```
 >
 > Or browse to the [releases page](https://github.com/manaflow-ai/cla-github-action/releases)
-> or [commits page](https://github.com/manaflow-ai/cla-github-action/commits/main),
+> or [commits page](https://github.com/manaflow-ai/cla-github-action/commits/master),
 > pick a commit, and copy the full SHA. After pinning, add the human-readable
 > reference as a trailing comment so future readers know what they're looking at:
 >
