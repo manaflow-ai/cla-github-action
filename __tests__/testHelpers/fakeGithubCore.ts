@@ -26,6 +26,8 @@ export interface GitActorFixture {
 
 export interface PullRequest {
   number: number
+  /** Test-only REST response number override for identity validation. */
+  apiNumber?: number
   /** Test-only GraphQL totalCount override for fail-closed limit coverage. */
   reportedCommitTotalCount?: number
   head: {
@@ -280,7 +282,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
     const pr = repository.pulls.get(num)
     if (!pr) return notFound()
     return json(200, {
-      number: pr.number,
+      number: pr.apiNumber ?? pr.number,
       head: {
         sha: pr.head.sha,
         ref: pr.head.apiRef || 'feature/test',

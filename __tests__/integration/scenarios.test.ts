@@ -1593,6 +1593,45 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('rejects an open REST response for a different Pull Request number', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    repository.addPullRequest({
+      number: 43,
+      apiNumber: 44,
+      head: { sha: 'headsha', ref: 'feature/wrong-live-number' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    repository.setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 43,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 43,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: repository.state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /Live Pull Request number does not match the event/i
+    )
+    expect(repository.listComments(43)).toHaveLength(0)
+    watch.restore()
+  })
+
   it('accepts an edited event for an open Pull Request that still targets main', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
