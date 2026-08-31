@@ -142,6 +142,8 @@ If the contributor has already signed the CLA, then the PR status will pass with
 
 This action does not rerun an earlier workflow after it records a signature. Repositories that need an immediate required-check update must use a separate trusted job. That job must bind the rerun to the current Pull Request number, head commit SHA, workflow file, and base branch before it calls the Actions rerun API.
 
+The action does not automatically retry GitHub API requests. A transient GitHub failure fails the current run, which can then be rerun after GitHub recovers. This avoids duplicate comments or ledger writes when GitHub completed a state change but its response was lost.
+
 ##### Demo for step 2 and 3
 
 ![signature-process](https://github.com/cla-assistant/github-action/blob/master/images/signature-process.gif?raw=true)

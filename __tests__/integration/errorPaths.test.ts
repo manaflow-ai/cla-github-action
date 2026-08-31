@@ -47,7 +47,7 @@ describe('error paths', () => {
     resetEnv()
   })
 
-  it('retries and recovers from a one-shot GitHub 5xx response', async () => {
+  it('fails closed without replaying a one-shot GitHub 5xx response', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
@@ -82,12 +82,9 @@ describe('error paths', () => {
     await runAction()
 
     expect(watch.failures.join('\n')).toMatch(
-      /Committers of Pull Request number 7/
+      /Could not retrieve repository contents/
     )
-    expect(watch.failures.join('\n')).not.toMatch(
-      /Could not retrieve repository contents|Could not update the JSON file/
-    )
-    expect(fake.repo('acme', 'widgets').listComments(7)).toHaveLength(1)
+    expect(fake.repo('acme', 'widgets').listComments(7)).toHaveLength(0)
     watch.restore()
   })
 
@@ -316,9 +313,7 @@ describe('error paths', () => {
       commits: [{ author: { login: 'alice', id: 1001 } }]
     })
     fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
-      signedContributors: [
-        { name: 'x'.repeat(1_000_001), id: 9999 }
-      ]
+      signedContributors: [{ name: 'x'.repeat(1_000_001), id: 9999 }]
     })
     setContext({
       owner: 'acme',

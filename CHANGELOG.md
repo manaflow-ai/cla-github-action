@@ -53,6 +53,9 @@ commit that introduced it.
   opener, state, and merge result before the action locks the conversation.
 - The new `required-base-ref` input has an empty compatibility default, which
   preserves upstream behavior. Protected deployments must set it explicitly.
+- GitHub API failures fail the current run without automatic request replay.
+  This prevents an ambiguous lost response from creating duplicate comments
+  or ledger writes. Operators can rerun the failed workflow after recovery.
 
 ### Changed
 
