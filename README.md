@@ -49,6 +49,13 @@ jobs:
       contents: write # this can be read if signatures are in a remote repository
       issues: write
       pull-requests: write
+    # Every job that can write the shared signature ledger, including a
+    # separate merged-PR lock job, must use this same group. Otherwise two
+    # Contents API writes can race on the ledger file SHA.
+    concurrency:
+      group: cla-signatures-${{ github.repository }}
+      queue: max
+      cancel-in-progress: false
     steps:
       - name: "CLA Assistant"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
@@ -64,8 +71,9 @@ jobs:
           # Initialize this branch, then restrict writes to trusted CLA automation.
           branch: 'cla-signatures'
           required-base-ref: 'main'
-          # Exempt only an authenticated PR opener with this numeric account ID.
-          allowlist-ids: '49699333'
+          # Add allowlist-ids only for a documented automated PR opener, using
+          # that opener's numeric GitHub account ID. Never allowlist a name or
+          # email from commit metadata.
 
          # the followings are the optional inputs - If the optional inputs are not given, then default values will be taken
           #remote-organization-name: enter the remote organization name where the signatures should be stored (Default is storing the signatures in the same repository)
@@ -160,6 +168,8 @@ The action does not automatically retry GitHub API requests. A transient GitHub 
 After the contributor signed a CLA, the contributor's signature with metadata will be stored in a JSON file inside the repository and you can specify the custom path to this file with `path-to-signatures` input in the workflow. <br/> The default path is `path-to-signatures: 'signatures/version1/cla.json'`.
 
 Protect the signature ledger from normal collaborator writes. Use a repository ruleset that permits only the trusted CLA automation identity, or store the ledger in a private repository where only that identity can write. The action token or configured App/PAT must have permission to update the protected target.
+
+If you split merged-pull-request locking into another job, give that job the same `cla-signatures-${{ github.repository }}` concurrency group and set `queue: max` with `cancel-in-progress: false`. This serializes lock and ledger writes.
 
 Ledger entries do not contain a CLA document hash or terms version. If the CLA text changes, use a new ledger path and signing declaration, and require contributors to sign again. Without this policy, an old ledger entry cannot prove which document version the contributor accepted.
 
