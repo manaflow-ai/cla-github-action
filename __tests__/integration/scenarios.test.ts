@@ -657,7 +657,7 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('does not treat GitHub web infrastructure as an unknown human committer', async () => {
+  it('does not exempt forged GitHub infrastructure committer metadata', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 21,
@@ -692,9 +692,11 @@ describe('CLA action end-to-end scenarios', () => {
     await runAction()
 
     const body = fake.repo('acme', 'widgets').listComments(21)[0]!.body
-    expect(body).toMatch(/all contributors have signed the cla/i)
-    expect(body).not.toContain('noreply@github.com')
-    expect(watch.failures).toEqual([])
+    expect(body).toContain('[!WARNING]')
+    expect(body).toContain('noreply@github.com')
+    expect(watch.failures.join('\n')).toMatch(
+      /Committers of Pull Request number 21/
+    )
     watch.restore()
   })
 
