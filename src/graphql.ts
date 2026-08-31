@@ -2,6 +2,11 @@ import { context } from '@actions/github'
 import { Committer } from './interfaces'
 import { octokit } from './octokit'
 import { errorMessage } from './shared/errors'
+import {
+  MAX_AUTHORS_PER_COMMIT,
+  MAX_GIT_IDENTITY_ASSERTIONS,
+  MAX_PULL_REQUEST_COMMITS
+} from './shared/limits'
 
 interface GraphQLUser {
   databaseId?: number | null
@@ -48,9 +53,6 @@ type CommitIdentityRole = 'primaryAuthor' | 'coAuthor' | 'committer'
 // Bound work on untrusted Pull Request data. These limits are well above a
 // normal contribution but stop a single PR from consuming an unbounded number
 // of GraphQL pages or creating an unbounded signature set.
-const MAX_PULL_REQUEST_COMMITS = 1000
-const MAX_GIT_IDENTITY_ASSERTIONS = 1000
-
 const COMMITS_QUERY = `
 query($owner:String! $name:String! $number:Int! $cursor:String){
     repository(owner: $owner, name: $name) {
@@ -195,7 +197,7 @@ export default async function getCommitters(
         const commit = edge.node.commit
         if (commit.authors.pageInfo.hasNextPage) {
           throw new Error(
-            'A commit has more than 100 authors. The action cannot verify every identity and will fail closed.'
+            `A commit has more than ${MAX_AUTHORS_PER_COMMIT} authors. The action cannot verify every identity and will fail closed.`
           )
         }
         if (!commit.author || commit.authors.nodes.length === 0) {

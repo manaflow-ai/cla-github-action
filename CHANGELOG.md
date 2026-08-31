@@ -51,8 +51,9 @@ commit that introduced it.
   explicit minimum token permissions, disabled checkout credential
   persistence, and job timeouts. CODEOWNERS and weekly Dependabot updates
   cover the action, npm dependencies, and workflow dependencies.
-- Pull Requests with more than 1,000 commits or more than 1,000 git identity
-  assertions fail closed to bound work on untrusted GraphQL data.
+- Pull Requests with more than 1,000 commits or more than 101,000 git identity
+  assertions fail closed to bound work on untrusted GraphQL data. The identity
+  bound is derived from the maximum 100 authors per commit plus one committer.
 - The action no longer unlocks a reopened Pull Request. It preserves
   maintainer locks and tells maintainers to unlock the conversation manually.
 - A failed request to lock a merged Pull Request now fails the action instead

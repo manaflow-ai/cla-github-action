@@ -1498,9 +1498,13 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('fails closed when a pull request reports more than 1000 git identity assertions', async () => {
+  it('fails closed when a pull request exceeds the bounded identity envelope', async () => {
     const watch = watchCore()
-    const commits = Array.from({ length: 11 }, (_, commitIndex) => ({
+    const coAuthors = Array.from({ length: 100 }, (_, authorIndex) => ({
+      login: `coauthor-${authorIndex}`,
+      id: 300_000 + authorIndex
+    }))
+    const commits = Array.from({ length: 1000 }, (_, commitIndex) => ({
       author: {
         login: `author-${commitIndex}`,
         id: 100_000 + commitIndex
@@ -1509,10 +1513,7 @@ describe('CLA action end-to-end scenarios', () => {
         login: `committer-${commitIndex}`,
         id: 200_000 + commitIndex
       },
-      coAuthors: Array.from({ length: 98 }, (_, authorIndex) => ({
-        login: `coauthor-${commitIndex}-${authorIndex}`,
-        id: 300_000 + commitIndex * 100 + authorIndex
-      }))
+      coAuthors
     }))
     fake.repo('acme', 'widgets').addPullRequest({
       number: 33,
@@ -1542,7 +1543,7 @@ describe('CLA action end-to-end scenarios', () => {
     await runAction()
 
     expect(watch.failures.join('\n')).toMatch(
-      /more than 1000 git identity assertions/i
+      /more than 101000 git identity assertions/i
     )
     expect(fake.repo('acme', 'widgets').listComments(33)).toHaveLength(0)
     watch.restore()

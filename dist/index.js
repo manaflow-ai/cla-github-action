@@ -48236,15 +48236,36 @@ function errorStatus(err) {
     return undefined;
 }
 
+;// CONCATENATED MODULE: ./src/shared/limits.ts
+/** Fail-closed bounds for data controlled by Pull Request contributors. */
+const MAX_PULL_REQUEST_COMMITS = 1000;
+// Commit.authors(first: 100) returns at most 100 author/co-author identities.
+// One additional assertion is collected for the git committer. Keep the
+// aggregate identity bound derived from the commit envelope so a valid PR at
+// the commit limit does not fail early merely because each commit has a
+// committer assertion too.
+const MAX_AUTHORS_PER_COMMIT = 100;
+const MAX_GIT_IDENTITY_ASSERTIONS = MAX_PULL_REQUEST_COMMITS * (MAX_AUTHORS_PER_COMMIT + 1);
+const MAX_PULL_REQUEST_COMMENTS = 1000;
+const MAX_LEDGER_SIGNATURES = 10_000;
+// GitHub's Contents API only supports files up to 1 MB.
+const MAX_LEDGER_BYTES = 1_000_000;
+// Concurrent pull requests write the shared ledger with optimistic locking.
+// Keep retries bounded so a persistent conflict cannot turn into a runner
+// hang or an unbounded API loop.
+const MAX_LEDGER_WRITE_ATTEMPTS = 3;
+// A first-file create can lose a race with another Pull Request. Retry only
+// the safe read that confirms the other run created a valid ledger.
+const MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS = 3;
+
 ;// CONCATENATED MODULE: ./src/graphql.ts
+
 
 
 
 // Bound work on untrusted Pull Request data. These limits are well above a
 // normal contribution but stop a single PR from consuming an unbounded number
 // of GraphQL pages or creating an unbounded signature set.
-const MAX_PULL_REQUEST_COMMITS = 1000;
-const MAX_GIT_IDENTITY_ASSERTIONS = 1000;
 const COMMITS_QUERY = `
 query($owner:String! $name:String! $number:Int! $cursor:String){
     repository(owner: $owner, name: $name) {
@@ -48362,7 +48383,7 @@ async function getCommitters(expectedHeadSha) {
             for (const edge of page.edges) {
                 const commit = edge.node.commit;
                 if (commit.authors.pageInfo.hasNextPage) {
-                    throw new Error('A commit has more than 100 authors. The action cannot verify every identity and will fail closed.');
+                    throw new Error(`A commit has more than ${MAX_AUTHORS_PER_COMMIT} authors. The action cannot verify every identity and will fail closed.`);
                 }
                 if (!commit.author || commit.authors.nodes.length === 0) {
                     throw new Error('GitHub returned a commit without an author identity. The action will fail closed.');
@@ -48435,20 +48456,6 @@ function actorsMatch(left, right) {
     const rightEmail = right.email?.trim().toLowerCase();
     return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
 }
-
-;// CONCATENATED MODULE: ./src/shared/limits.ts
-/** Fail-closed bounds for data controlled by Pull Request contributors. */
-const MAX_PULL_REQUEST_COMMENTS = 1000;
-const MAX_LEDGER_SIGNATURES = 10_000;
-// GitHub's Contents API only supports files up to 1 MB.
-const MAX_LEDGER_BYTES = 1_000_000;
-// Concurrent pull requests write the shared ledger with optimistic locking.
-// Keep retries bounded so a persistent conflict cannot turn into a runner
-// hang or an unbounded API loop.
-const MAX_LEDGER_WRITE_ATTEMPTS = 3;
-// A first-file create can lose a race with another Pull Request. Retry only
-// the safe read that confirms the other run created a valid ledger.
-const MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS = 3;
 
 ;// CONCATENATED MODULE: ./src/persistence/persistence.ts
 
