@@ -1,3 +1,4 @@
+import { context } from '@actions/github'
 import { resetEnv, setDefaultInputs, setInput } from '../testHelpers/env'
 import { commentContent } from '../../src/pullrequest/pullRequestCommentContent'
 import { CommitterMap } from '../../src/interfaces'
@@ -277,6 +278,47 @@ describe('commentContent (CLA mode)', () => {
     setInput('suggest-recheck', 'true')
     const body = commentContent(false, committerMap())
     expect(body).toContain('retrigger this bot by commenting **recheck**')
+  })
+})
+
+describe('commentContent identity profile links', () => {
+  const originalServerUrl = context.serverUrl
+
+  beforeEach(() => setDefaultInputs())
+  afterEach(() => {
+    resetEnv()
+    context.serverUrl = originalServerUrl
+  })
+
+  it('uses the active GitHub Enterprise server host for mapped identities', () => {
+    context.serverUrl = 'https://github.enterprise.example'
+
+    const body = commentContent(
+      false,
+      committerMap({
+        signed: [{ name: 'alice', id: 1, pullRequestNo: 7 }],
+        notSigned: [{ name: 'bob', id: 2, pullRequestNo: 7 }]
+      })
+    )
+
+    expect(body).toContain(
+      ':x: [bob](https://github.enterprise.example/bob)'
+    )
+    expect(body).not.toContain('https://github.com/bob')
+  })
+
+  it('uses the active public GitHub host for mapped identities', () => {
+    context.serverUrl = 'https://github.com'
+
+    const body = commentContent(
+      false,
+      committerMap({
+        signed: [{ name: 'alice', id: 1, pullRequestNo: 7 }],
+        notSigned: [{ name: 'bob', id: 2, pullRequestNo: 7 }]
+      })
+    )
+
+    expect(body).toContain(':x: [bob](https://github.com/bob)')
   })
 })
 
