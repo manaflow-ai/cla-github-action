@@ -5,6 +5,9 @@ import { commentContent } from './pullRequestCommentContent'
 import { CommitterMap, Committer, ReactedCommitterMap } from '../interfaces'
 import { getUseDcoFlag } from '../shared/getInputs'
 import { errorMessage } from '../shared/errors'
+import * as core from '@actions/core'
+
+const ACTIONS_BOT_LOGIN = 'github-actions[bot]'
 
 export default async function prCommentSetup(
   committerMap: CommitterMap,
@@ -96,11 +99,43 @@ async function getComment() {
     const marker = getUseDcoFlag()
       ? /.*DCO Assistant Lite bot.*/m
       : /.*CLA Assistant Lite bot.*/m
-    return comments.find(comment => comment.body?.match(marker))
-  } catch (error) {
-    throw new Error(
-      `Error occured when getting  all the comments of the pull request: ${errorMessage(error)}`
+    const markerComments = comments.filter(comment =>
+      comment.body?.match(marker)
     )
+    if (markerComments.length === 0) return undefined
+
+    // A marker string is public and can be copied by any commenter. Resolve
+    // GitHub's canonical Actions bot account and accept only a marker written
+    // by that API identity. This avoids a hard-coded database ID while still
+    // failing closed if GitHub cannot verify the bot account.
+    const canonicalBot = await octokit.rest.users.getByUsername({
+      username: ACTIONS_BOT_LOGIN
+    })
+    if (
+      canonicalBot.data.type !== 'Bot' ||
+      canonicalBot.data.login.toLowerCase() !== ACTIONS_BOT_LOGIN ||
+      !canonicalBot.data.id
+    ) {
+      throw new Error(
+        'GitHub did not return the canonical Actions bot identity'
+      )
+    }
+
+    const trusted = markerComments.find(
+      comment =>
+        comment.user?.id === canonicalBot.data.id &&
+        comment.user.login.toLowerCase() ===
+          canonicalBot.data.login.toLowerCase() &&
+        comment.user.type === canonicalBot.data.type
+    )
+    if (!trusted) {
+      core.warning(
+        'Ignored a CLA marker comment because it was not written by the canonical GitHub Actions bot.'
+      )
+    }
+    return trusted
+  } catch {
+    throw new Error('Could not retrieve or verify CLA bot comments')
   }
 }
 

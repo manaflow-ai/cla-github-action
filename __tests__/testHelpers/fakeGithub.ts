@@ -25,7 +25,6 @@ export function installFakeGitHub(): FakeGitHub {
   setGlobalDispatcher(agent)
 
   const core = createFakeGitHubCore()
-  const pool = agent.get('https://api.github.com')
 
   function makeReply(method: string) {
     return (opts: any) => {
@@ -41,6 +40,7 @@ export function installFakeGitHub(): FakeGitHub {
     }
   }
 
+  const pool = agent.get('https://api.github.com')
   for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const) {
     pool.intercept({ path: /.*/, method }).reply(makeReply(method)).persist()
   }

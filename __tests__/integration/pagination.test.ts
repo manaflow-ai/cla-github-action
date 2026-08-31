@@ -47,7 +47,7 @@ describe('pagination', () => {
     }
     // Insert the sign phrase at index 140 — unreachable without pagination.
     fake.repo('acme', 'widgets').addComment(7, {
-      body: 'i have read the cla document and i hereby sign the cla',
+      body: 'I have read the CLA Document and I hereby sign the CLA',
       user: { login: 'alice', id: 1001 }
     })
 

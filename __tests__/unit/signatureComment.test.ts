@@ -21,7 +21,10 @@ describe('commentContainsSignature', () => {
     ['empty body', ''],
     ['unrelated text', 'recheck'],
     ['lower-case wording', CLA.toLowerCase()],
-    ['changed whitespace inside the phrase', CLA.replace('CLA Document', 'CLA  Document')],
+    [
+      'changed whitespace inside the phrase',
+      CLA.replace('CLA Document', 'CLA  Document')
+    ],
     ['trailing period', `${CLA}.`],
     ['trailing exclamation', `${CLA}!`],
     ['appended recheck', `${CLA}\nrecheck`],
@@ -47,7 +50,10 @@ describe('commentContainsSignature', () => {
     expect(commentContainsSignature(phrase, phrase)).toBe(true)
     expect(commentContainsSignature(`${phrase}\nrecheck`, phrase)).toBe(false)
     expect(
-      commentContainsSignature('I have read the Contributor Terms\n> I sign the CLA', phrase)
+      commentContainsSignature(
+        'I have read the Contributor Terms\n> I sign the CLA',
+        phrase
+      )
     ).toBe(false)
   })
 })

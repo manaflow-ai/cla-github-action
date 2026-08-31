@@ -7,6 +7,13 @@ export interface Committer {
   id: number
   pullRequestNo?: number | undefined
   /**
+   * True for identities that GitHub derived from a Co-authored-by trailer.
+   * A trailer is an assertion in attacker-controlled commit text. A stored
+   * signature from another PR must therefore not satisfy this identity; the
+   * named account must post the exact signature on the current PR.
+   */
+  requiresCurrentSignature?: boolean | undefined
+  /**
    * Commit-author email. Present only when the GraphQL lookup could not map
    * the commit to a GitHub user (i.e. when this committer ends up in
    * CommitterMap.unknown). Surfaced to the contributor in the PR comment so
@@ -26,6 +33,7 @@ export interface SigningComment extends Committer {
   body?: string | undefined
   created_at?: string | undefined
   repoId?: number | undefined
+  actorType?: string | undefined
 }
 
 export interface CommitterMap {
@@ -33,7 +41,7 @@ export interface CommitterMap {
   notSigned: Committer[]
   unknown: Committer[]
   /**
-   * Populated when the PR opener is not listed as an author or co-author of
+   * Populated when the PR opener is not listed as an author, co-author, or committer of
    * any commit in the PR. The bot comment renders a CAUTION block naming the
    * opener and the actual commit authors so maintainers can see the
    * mismatch at a glance.

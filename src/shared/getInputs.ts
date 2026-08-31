@@ -17,8 +17,14 @@ export const getPathToDocument = (): string =>
 export const getBranch = (): string =>
   core.getInput('branch', { required: false })
 
+export const getRequiredBaseRef = (): string =>
+  core.getInput('required-base-ref', { required: false }) || 'main'
+
 export const getAllowListItem = (): string =>
   core.getInput('allowlist', { required: false })
+
+export const getAllowListIds = (): string =>
+  core.getInput('allowlist-ids', { required: false })
 
 export const getSignedCommitMessage = (): string =>
   core.getInput('signed-commit-message', { required: false })
@@ -43,7 +49,7 @@ export const lockPullRequestAfterMerge = (): boolean =>
 export const suggestRecheck = (): boolean => getBooleanInput('suggest-recheck')
 
 /**
- * Whether the PR opener must be recorded as an author or co-author of at
+ * Whether the PR opener must be recorded as an author, co-author, or committer of at
  * least one commit in the PR. When true (the default), an opener who is not
  * in the authorship trail causes the check to fail — a guard against
  * impersonation of an attacker-submitted patch attributed to a trusted

@@ -11,7 +11,32 @@ commit that introduced it.
 
 ## Unreleased
 
-_Nothing yet._
+### Security
+
+- Commit identities now come from GitHub's GraphQL `Commit.authors`
+  connection. The action includes the primary author, resolved co-authors, and
+  meaningful committers. It no longer trusts a numeric ID written in a raw
+  `Co-authored-by` trailer.
+- A co-author asserted in commit text must post the exact declaration on the
+  current Pull Request. A stored signature from an earlier Pull Request cannot
+  satisfy that assertion.
+- The deprecated name, email, and glob `allowlist` is ignored. The new
+  `allowlist-ids` input accepts only verified numeric GitHub account IDs.
+- Signature comments must contain only the exact declaration. Appended text,
+  changed case or punctuation, quotations, and bot comments do not count.
+- Existing CLA marker comments are trusted only when GitHub confirms that the
+  canonical Actions bot wrote them.
+- The action checks the live Pull Request state, repository, base branch, head
+  commit, and opener before signature work and again before a ledger write.
+- The signature ledger now rejects invalid entries and removes duplicate IDs.
+- The unsafe branch-based internal workflow rerun was removed. A repository
+  must use a separate trusted rerun job that validates the Pull Request number
+  and current head commit.
+
+### Changed
+
+- Updated the production Actions toolkit to `@actions/core` 3.0.1 and
+  `@actions/github` 9.1.1. Updated the action bundle to the Node 24 runtime.
 
 ## v3.2.0 — 2026-06-17
 

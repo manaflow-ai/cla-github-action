@@ -31,12 +31,15 @@ export default async function signatureWithPRComment(
       body: prComment.body ?? '',
       created_at: prComment.created_at,
       repoId,
-      pullRequestNo: context.issue.number
+      pullRequestNo: context.issue.number,
+      actorType: prComment.user.type
     })
   }
   for (const comment of listOfPRComments) {
-    if (isCommentSignedByUser(comment.body ?? '', comment.name)) {
-      const { body: _, ...withoutBody } = comment
+    if (
+      isCommentSignedByUser(comment.body ?? '', comment.name, comment.actorType)
+    ) {
+      const { body: _, actorType: __, ...withoutBody } = comment
       filteredListOfPRComments.push(withoutBody)
     }
   }
@@ -68,69 +71,31 @@ export default async function signatureWithPRComment(
 
 export function isCommentSignedByUser(
   comment: string,
-  commentAuthor: string
+  commentAuthor: string,
+  actorType?: string
 ): boolean {
-  if (commentAuthor === 'github-actions[bot]') {
+  if (
+    actorType === 'Bot' ||
+    commentAuthor.toLowerCase() === 'github-actions[bot]' ||
+    commentAuthor.toLowerCase().endsWith('[bot]')
+  ) {
     return false
   }
   return commentContainsSignature(comment, getPrSignComment())
 }
 
-/** Any extra text in the comment must not exceed the phrase length, with a
- * small absolute floor so that very short custom phrases still tolerate a
- * brief remark such as `recheck` on a separate line. */
-const MIN_EXTRA_TEXT_ALLOWANCE = 32
-
-/** Placeholder for a Markdown blockquote line in the normalised body so that
- * the phrase block can never match across, or onto, a quoted line. */
-const QUOTE_LINE = '\0'
-
 /**
  * Decide whether a PR comment counts as signing the CLA/DCO.
  *
- * The configured sign phrase must appear, verbatim, as a contiguous block of
- * lines in the comment, with each phrase line being the only content of the
- * matching comment line (case-insensitive; runs of whitespace collapsed;
- * trailing `.` or `!` ignored; blank lines skipped). A comment line that
- * begins with a Markdown quote marker (`>`) is never treated as a match,
- * because quoted text is attributed to whoever is being quoted, not to the
- * comment author. The phrase must also make up the bulk of the comment —
- * any extra text may be at most `max(phrase.length, MIN_EXTRA_TEXT_ALLOWANCE)`
- * characters — so a short addition is tolerated but the declaration cannot
- * be buried inside a longer message.
+ * The configured declaration must be the entire non-whitespace comment body.
+ * Case, wording, punctuation, and internal whitespace must match exactly.
+ * This keeps the recorded electronic signature aligned with the declaration
+ * in the CLA and rejects quotations, qualifications, and appended commands.
  */
 export function commentContainsSignature(
   commentBody: string,
   signPhrase: string
 ): boolean {
-  const collapse = (s: string): string =>
-    s.replace(/\s+/g, ' ').trim().toLowerCase()
-  const normLine = (s: string): string => collapse(s.replace(/[.!]+\s*$/, ''))
-
-  const phraseLines = signPhrase
-    .split(/\r?\n/)
-    .map(normLine)
-    .filter(l => l !== '')
-  if (phraseLines.length === 0) {
-    return false
-  }
-
-  const bodyLines = commentBody
-    .split(/\r?\n/)
-    .map(l => (l.trimStart().startsWith('>') ? QUOTE_LINE : normLine(l)))
-    .filter(l => l !== '')
-
-  const hasOwnBlock = bodyLines.some(
-    (_, i) =>
-      i + phraseLines.length <= bodyLines.length &&
-      phraseLines.every((pl, k) => bodyLines[i + k] === pl)
-  )
-  if (!hasOwnBlock) {
-    return false
-  }
-
-  const phraseLen = collapse(signPhrase).length
-  const bodyLen = collapse(commentBody).length
-  const allowance = Math.max(phraseLen, MIN_EXTRA_TEXT_ALLOWANCE)
-  return bodyLen <= phraseLen + allowance
+  const declaration = signPhrase.trim()
+  return declaration.length > 0 && commentBody.trim() === declaration
 }

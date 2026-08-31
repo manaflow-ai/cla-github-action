@@ -61,11 +61,11 @@ function defaultInputEnv(
     'INPUT_PATH-TO-SIGNATURES': 'signatures/cla.json',
     'INPUT_PATH-TO-DOCUMENT': 'https://example.com/cla',
     INPUT_BRANCH: 'main',
+    'INPUT_REQUIRED-BASE-REF': 'main',
     INPUT_ALLOWLIST: '',
     'INPUT_ALLOWLIST-IDS': '',
     'INPUT_USE-DCO-FLAG': 'false',
-    'INPUT_LOCK-PULLREQUEST-AFTERMERGE': 'true',
-    'INPUT_RERUN-WORKFLOW': 'false'
+    'INPUT_LOCK-PULLREQUEST-AFTERMERGE': 'true'
   }
   return { ...base, ...overrides }
 }
@@ -115,8 +115,16 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
 
     const eventPath = writeEventFile({
       action: 'opened',
-      pull_request: { number: 7, state: 'open' },
-      repository: { id: fake.repo('acme', 'widgets').state.id }
+      pull_request: {
+        number: 7,
+        state: 'open',
+        head: { sha: 'headsha' },
+        base: { ref: 'main', repo: { full_name: 'acme/widgets' } }
+      },
+      repository: {
+        id: fake.repo('acme', 'widgets').state.id,
+        full_name: 'acme/widgets'
+      }
     })
 
     const result = await runDist({
@@ -136,7 +144,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
     expect(comments[0]!.body).toMatch(/CLA Assistant Lite bot/)
   }, 20000)
 
-  it('bundled action writes a new signature without automatically rerunning a workflow', async () => {
+  it('bundled action writes a signature and leaves reruns to an exact-head workflow job', async () => {
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
       head: { sha: 'headsha', ref: 'feature/cla' },
@@ -147,7 +155,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
       .setFile('signatures/cla.json', { signedContributors: [] })
     fake.repo('acme', 'widgets').addComment(7, {
       body: 'something **CLA Assistant Lite bot** says',
-      user: { login: 'github-actions[bot]', id: 41898282 }
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
     })
     fake.repo('acme', 'widgets').addComment(7, {
       body: 'I have read the CLA Document and I hereby sign the CLA',
@@ -159,12 +167,15 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
 
     const eventPath = writeEventFile({
       action: 'created',
-      issue: { number: 7, pull_request: {} },
+      issue: { number: 7, state: 'open', pull_request: {} },
       comment: {
         body: 'I have read the CLA Document and I hereby sign the CLA',
         user: { login: 'alice', id: 1001 }
       },
-      repository: { id: fake.repo('acme', 'widgets').state.id }
+      repository: {
+        id: fake.repo('acme', 'widgets').state.id,
+        full_name: 'acme/widgets'
+      }
     })
 
     const result = await runDist({

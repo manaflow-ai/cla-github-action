@@ -11,8 +11,14 @@ inputs:
   branch:
     description: "provide a branch where all the CLAs are stored"
     default: "master"
+  required-base-ref:
+    description: "Pull Request base branch allowed to write signatures."
+    default: "main"
   allowlist:
-    description: "users in the allow list don't have to sign the CLA document"
+    description: "Deprecated and ignored. Raw names, emails, and globs can be spoofed in commit metadata."
+    default: ""
+  allowlist-ids:
+    description: "Comma-separated numeric GitHub user IDs that do not have to sign. IDs are matched only against GitHub-resolved actors."
     default: ""
   remote-repository-name:
     description: "provide the remote repository name where all the signatures should be stored"
@@ -42,7 +48,7 @@ inputs:
   require-opener-as-author:
     description: >
       When 'true' (the default), fail the check if the Pull Request opener is
-      not recorded as an author or co-author of any commit in the PR. This
+      not recorded as an author, co-author, or committer of any commit in the PR. This
       guards against an attacker opening a PR whose commits are attributed to
       a trusted identity the attacker does not control. Set to 'false' for
       workflows where the PR submitter legitimately pushes commits authored by
@@ -52,8 +58,8 @@ inputs:
 outputs:
   opener_not_in_commits:
     description: >
-      Set to 'true' when the Pull Request opener is not recorded as an author
-      or co-author of any commit in the PR. Emitted regardless of whether
+      Set to 'true' when the Pull Request opener is not recorded as an author,
+      co-author, or committer of any commit in the PR. Emitted regardless of whether
       'require-opener-as-author' caused the check to fail, so repositories
       can gate additional workflows (e.g. branch protection rules) on this
       output independently of the CLA-check pass/fail.

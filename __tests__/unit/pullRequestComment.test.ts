@@ -240,4 +240,41 @@ describe('prCommentSetup', () => {
     expect(captured.body.body).toContain('CLA Assistant Lite bot')
     http.assertClean()
   })
+
+  it('fails closed without exposing the bot identity API response', async () => {
+    listCommentsInterceptor(http, [
+      {
+        id: 777,
+        body: '**CLA Assistant Lite bot**: notice',
+        user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+        created_at: '2024-01-01'
+      }
+    ])
+    http
+      .github()
+      .intercept({
+        path: /\/users\/github-actions(?:%5B|\[)bot(?:%5D|\])$/i,
+        method: 'GET'
+      })
+      .reply(
+        500,
+        { message: 'sensitive upstream response' },
+        { headers: { 'content-type': 'application/json' } }
+      )
+
+    const prCommentSetup = loadModule()
+    const attempt = prCommentSetup(
+      {
+        signed: [],
+        notSigned: [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+        unknown: []
+      },
+      [{ name: 'alice', id: 1, pullRequestNo: 42 }]
+    )
+    await expect(attempt).rejects.toThrow(
+      'Could not retrieve or verify CLA bot comments'
+    )
+    await expect(attempt).rejects.not.toThrow('sensitive upstream response')
+    http.assertClean()
+  })
 })

@@ -57,10 +57,10 @@ export async function updateFile(
   const pullRequestNo = context.issue.number
 
   const updated: ClaFileContent = {
-    signedContributors: [
+    signedContributors: dedupeSignatures([
       ...claFileContent.signedContributors,
       ...reactedCommitters.newSigned
-    ]
+    ])
   }
   const contentBinary = Buffer.from(JSON.stringify(updated, null, 2)).toString(
     'base64'
@@ -74,6 +74,20 @@ export async function updateFile(
     message: buildSignedCommitMessage(pullRequestNo),
     content: contentBinary,
     branch: t.branch
+  })
+}
+
+function dedupeSignatures(
+  signatures: ClaFileContent['signedContributors']
+): ClaFileContent['signedContributors'] {
+  const seen = new Set<number>()
+  return signatures.filter(signature => {
+    if (!Number.isSafeInteger(signature.id) || signature.id <= 0) {
+      throw new Error('Cannot persist a CLA signature without a valid user ID')
+    }
+    if (seen.has(signature.id)) return false
+    seen.add(signature.id)
+    return true
   })
 }
 

@@ -297,6 +297,7 @@ describe('CLA action end-to-end scenarios', () => {
     fake.repo('acme', 'widgets').addPullRequest({
       number: 12,
       head: { sha: 'headsha', ref: 'feature/email' },
+      user: { login: 'mystery', id: 1001 },
       // No `login` / `id` — this maps to an unknown committer in the action.
       commits: [
         { author: { name: 'Mystery Contributor', email: 'typo@example.com' } }
@@ -343,6 +344,7 @@ describe('CLA action end-to-end scenarios', () => {
     fake.repo('acme', 'widgets').addPullRequest({
       number: 13,
       head: { sha: 'headsha', ref: 'feature/opener' },
+      user: { login: 'alice', id: 1001 },
       commits: [{ author: { login: 'bob', id: 2002 } }]
     })
     // Bob has already signed; alice has not.
@@ -529,6 +531,7 @@ describe('CLA action end-to-end scenarios', () => {
     fake.repo('acme', 'widgets').addPullRequest({
       number: 16,
       head: { sha: 'headsha', ref: 'feature/cherry' },
+      user: { login: 'alice', id: 1001 },
       commits: [{ author: { login: 'bob', id: 2002 } }]
     })
     // Both alice and bob have already signed — so the only failure path open
@@ -576,6 +579,7 @@ describe('CLA action end-to-end scenarios', () => {
     fake.repo('acme', 'widgets').addPullRequest({
       number: 17,
       head: { sha: 'headsha', ref: 'feature/cherry' },
+      user: { login: 'alice', id: 1001 },
       commits: [{ author: { login: 'bob', id: 2002 } }]
     })
     fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
@@ -700,6 +704,7 @@ describe('CLA action end-to-end scenarios', () => {
     fake.repo('acme', 'widgets').addPullRequest({
       number: 19,
       head: { sha: 'headsha', ref: 'automation/generated' },
+      user: { login: 'alice', id: 1001 },
       commits: [
         {
           author: { login: 'github-actions[bot]', id: 41898282 },
@@ -826,6 +831,43 @@ describe('CLA action end-to-end scenarios', () => {
       .repo('acme', 'widgets')
       .getFile('signatures/cla.json') as any
     expect(ledger.signedContributors).toEqual([])
+    watch.restore()
+  })
+
+  it('accepts an edited event for an open Pull Request that still targets main', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 24,
+      head: { sha: 'headsha', ref: 'feature/edited' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 24,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'edited',
+        pull_request: {
+          number: 24,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures).toEqual([])
+    expect(fake.repo('acme', 'widgets').listComments(24)[0]!.body).toMatch(
+      /all contributors have signed the cla/i
+    )
     watch.restore()
   })
 })

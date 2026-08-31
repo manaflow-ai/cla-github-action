@@ -86,7 +86,7 @@ function botSignature(mode: ModeText): string {
 }
 
 /**
- * Renders the "PR opener is not an author or co-author of any commit" block.
+ * Renders the "PR opener is not a commit identity" block.
  * Prepended to the rest of the comment so maintainers see it first. The
  * warning is either a hard block (require-opener-as-author=true; the default)
  * or a heads-up (require-opener-as-author=false, for repos with legitimate
@@ -104,7 +104,7 @@ function renderOpenerMismatchBlock(mismatch: {
 
   if (mismatch.hardFail) {
     return `> [!CAUTION]
-> **Pull Request opener is not an author or co-author of any commit in this PR.**
+> **Pull Request opener is not an author, co-author, or committer of any commit in this PR.**
 >
 > - Opener: @${mismatch.opener}
 > - Commit authors: ${authorList}
@@ -115,7 +115,7 @@ function renderOpenerMismatchBlock(mismatch: {
   }
 
   return `> [!NOTE]
-> Pull Request opener @${mismatch.opener} is not an author or co-author of any commit in this PR (commit authors: ${authorList}). The CLA check will still proceed and requires every listed author plus @${mismatch.opener} to have signed.
+> Pull Request opener @${mismatch.opener} is not an author, co-author, or committer of any commit in this PR (commit identities: ${authorList}). The CLA check will still proceed and requires every listed identity plus @${mismatch.opener} to have signed.
 
 `
 }

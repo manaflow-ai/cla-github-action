@@ -15,8 +15,6 @@ interface CoAuthor {
   email: string
   /** GitHub login extracted from an @users.noreply.github.com email, if present. */
   noreplyLogin?: string
-  /** GitHub numeric id extracted from the <id>+<login>@users.noreply.github.com form. */
-  noreplyId?: number
 }
 
 /**
@@ -27,21 +25,21 @@ interface CoAuthor {
 const TRAILER_RE = /^\s*co-authored-by:\s*(.+?)\s+<([^<>\s]+@[^<>\s]+)>\s*$/i
 
 /**
- * Extract a GitHub login (and optional numeric id) from an
+ * Extract a GitHub login from an
  * @users.noreply.github.com email. Two shapes are supported:
- *   <id>+<login>@users.noreply.github.com  (the modern form)
- *   <login>@users.noreply.github.com       (the legacy form; no id available)
+ *   <id>+<login>@users.noreply.github.com
+ *   <login>@users.noreply.github.com
+ *
+ * The numeric prefix is untrusted commit text. It is intentionally discarded.
  */
-function parseNoreply(email: string): { login?: string; id?: number } {
+function parseNoreply(email: string): { login?: string } {
   const m = /^(.+)@users\.noreply\.github\.com$/i.exec(email)
   if (!m) return {}
   const local = m[1]!
   const plus = local.indexOf('+')
   if (plus < 0) return { login: local }
-  const idPart = local.slice(0, plus)
   const loginPart = local.slice(plus + 1)
-  const id = /^\d+$/.test(idPart) ? parseInt(idPart, 10) : undefined
-  return { login: loginPart, ...(id === undefined ? {} : { id }) }
+  return { login: loginPart }
 }
 
 export function parseCoAuthors(message: string): CoAuthor[] {
@@ -59,8 +57,7 @@ export function parseCoAuthors(message: string): CoAuthor[] {
     out.push({
       name,
       email,
-      ...(noreply.login ? { noreplyLogin: noreply.login } : {}),
-      ...(noreply.id ? { noreplyId: noreply.id } : {})
+      ...(noreply.login ? { noreplyLogin: noreply.login } : {})
     })
   }
   return out

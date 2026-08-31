@@ -23,6 +23,37 @@ const defaults: TestContext = {
 /** Overwrite the @actions/github context with test values. */
 export function setContext(overrides: Partial<TestContext> = {}): TestContext {
   const ctx = { ...defaults, ...overrides }
+  const payload = { ...ctx.payload }
+  payload.repository = {
+    id: 5555,
+    full_name: `${ctx.owner}/${ctx.repo}`,
+    ...(payload.repository || {})
+  }
+  if (ctx.eventName === 'pull_request_target' && payload.pull_request) {
+    const pullRequest = payload.pull_request
+    payload.pull_request = {
+      number: ctx.issueNumber,
+      state: 'open',
+      ...pullRequest,
+      head: { sha: 'headsha', ...(pullRequest.head || {}) },
+      base: {
+        ref: 'main',
+        ...(pullRequest.base || {}),
+        repo: {
+          full_name: `${ctx.owner}/${ctx.repo}`,
+          ...(pullRequest.base?.repo || {})
+        }
+      }
+    }
+  }
+  if (ctx.eventName === 'issue_comment') {
+    payload.issue = {
+      number: ctx.issueNumber,
+      state: 'open',
+      pull_request: {},
+      ...(payload.issue || {})
+    }
+  }
   // @ts-ignore — overwrite the readonly Context instance for test setup
   github.context = {
     repo: { owner: ctx.owner, repo: ctx.repo },
@@ -30,9 +61,9 @@ export function setContext(overrides: Partial<TestContext> = {}): TestContext {
     actor: ctx.actor,
     eventName: ctx.eventName,
     workflow: ctx.workflow,
-    payload: ctx.payload
+    payload
   }
-  return ctx
+  return { ...ctx, payload }
 }
 
 /** Drop the module cache for src/octokit.ts so a test-owned GITHUB_TOKEN is picked up. */

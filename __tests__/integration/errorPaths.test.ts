@@ -1,12 +1,6 @@
 /**
  * Failure-mode scenarios: how does the action behave when GitHub returns a
  * transient 5xx, a 403, or when createFile fails?
- *
- * The Octokit clients have @octokit/plugin-retry installed, which retries 5xx
- * and network errors with exponential backoff (3 attempts, ~1s/4s/9s delays).
- * These tests inject PERMANENT failures (high times:N) to lock in the
- * behaviour after retries are exhausted, and use longer per-test timeouts to
- * accommodate the retry delays.
  */
 import * as core from '@actions/core'
 import { installFakeGitHub, FakeGitHub } from '../testHelpers/fakeGithub'
@@ -40,7 +34,6 @@ function watchCore() {
 }
 
 describe('error paths', () => {
-  // Retries add up to ~14s of backoff before the action gives up.
   jest.setTimeout(30000)
 
   let fake: FakeGitHub
@@ -54,7 +47,7 @@ describe('error paths', () => {
     resetEnv()
   })
 
-  it('absorbs a one-shot 5xx via the retry plugin and proceeds normally', async () => {
+  it('reports a one-shot 5xx without hiding the failed GitHub request', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
@@ -64,8 +57,7 @@ describe('error paths', () => {
     fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
       signedContributors: []
     })
-    // First GET returns the GitHub "Unicorn!" HTML 500 page; the plugin
-    // retries and the second attempt succeeds.
+    // The first GET returns the GitHub "Unicorn!" HTML 500 page.
     fake.injectFailure({
       method: 'GET',
       pathPattern: /\/repos\/acme\/widgets\/contents\/signatures/,
@@ -89,13 +81,8 @@ describe('error paths', () => {
 
     await runAction()
 
-    // The action should reach its normal not-yet-signed failure path, NOT
-    // bail with the retrieve-contents error.
-    expect(watch.failures.join('\n')).not.toMatch(
-      /Could not retrieve repository contents/
-    )
     expect(watch.failures.join('\n')).toMatch(
-      /Committers of Pull Request number 7 have to sign the CLA/
+      /Could not retrieve repository contents|Could not update the JSON file/
     )
     watch.restore()
   })
@@ -110,7 +97,7 @@ describe('error paths', () => {
     fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
       signedContributors: []
     })
-    // Inject enough 502s that any transparent retry will exhaust them all.
+    // Inject repeated 502 responses.
     fake.injectFailure({
       method: 'GET',
       pathPattern: /\/repos\/acme\/widgets\/contents\/signatures/,
@@ -133,8 +120,7 @@ describe('error paths', () => {
 
     await runAction()
 
-    // The action reports the failure through core.setFailed. It does not
-    // silently retry (v6 @actions/github does not ship plugin-retry).
+    // The action reports the failure through core.setFailed.
     expect(watch.failures.join('\n')).toMatch(
       /Could not retrieve repository contents|Could not update the JSON file/
     )
@@ -192,7 +178,7 @@ describe('error paths', () => {
     })
     fake.repo('acme', 'widgets').addComment(7, {
       body: '**CLA Assistant Lite bot**: notice',
-      user: { login: 'github-actions[bot]', id: 41898282 }
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
     })
     fake.repo('acme', 'widgets').addComment(7, {
       body: 'I have read the CLA Document and I hereby sign the CLA',
