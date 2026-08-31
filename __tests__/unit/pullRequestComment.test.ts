@@ -241,6 +241,42 @@ describe('prCommentSetup', () => {
     http.assertClean()
   })
 
+  it('rejects a marker when the canonical login resolves to an unexpected account ID', async () => {
+    http
+      .github()
+      .intercept({
+        path: /\/users\/github-actions(?:%5B|\[)bot(?:%5D|\])$/i,
+        method: 'GET'
+      })
+      .reply(
+        200,
+        { login: 'github-actions[bot]', id: 9001, type: 'Bot' },
+        { headers: { 'content-type': 'application/json' } }
+      )
+    const comments = [
+      {
+        id: 666,
+        body: 'spoofed **CLA Assistant Lite bot** marker',
+        user: { login: 'github-actions[bot]', id: 9001, type: 'Bot' },
+        created_at: '2024-01-01'
+      }
+    ]
+
+    const prCommentSetup = loadModule()
+    await expect(
+      prCommentSetup(
+        {
+          signed: [],
+          notSigned: [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+          unknown: []
+        },
+        [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+        comments
+      )
+    ).rejects.toThrow('Could not retrieve or verify CLA bot comments')
+    http.assertClean()
+  })
+
   it('fails closed without exposing the bot identity API response', async () => {
     listCommentsInterceptor(http, [
       {
