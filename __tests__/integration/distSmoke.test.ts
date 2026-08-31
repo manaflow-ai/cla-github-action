@@ -61,9 +61,11 @@ function defaultInputEnv(
     'INPUT_PATH-TO-SIGNATURES': 'signatures/cla.json',
     'INPUT_PATH-TO-DOCUMENT': 'https://example.com/cla',
     INPUT_BRANCH: 'main',
-    INPUT_ALLOWLIST: '*[bot]',
+    INPUT_ALLOWLIST: '',
+    'INPUT_ALLOWLIST-IDS': '',
     'INPUT_USE-DCO-FLAG': 'false',
-    'INPUT_LOCK-PULLREQUEST-AFTERMERGE': 'true'
+    'INPUT_LOCK-PULLREQUEST-AFTERMERGE': 'true',
+    'INPUT_RERUN-WORKFLOW': 'false'
   }
   return { ...base, ...overrides }
 }
@@ -134,7 +136,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
     expect(comments[0]!.body).toMatch(/CLA Assistant Lite bot/)
   }, 20000)
 
-  it('bundled action writes a new signature and requests a workflow rerun when a contributor signs via comment', async () => {
+  it('bundled action writes a new signature without automatically rerunning a workflow', async () => {
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
       head: { sha: 'headsha', ref: 'feature/cla' },
@@ -179,9 +181,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
       'alice'
     )
 
-    expect(fake.recordedRerunRequests).toEqual([
-      { owner: 'acme', repo: 'widgets', runId: 777 }
-    ])
+    expect(fake.recordedRerunRequests).toEqual([])
   }, 20000)
 
   it('bundled action calls the lock endpoint on a merged PR close event', async () => {

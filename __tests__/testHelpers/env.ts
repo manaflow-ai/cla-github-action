@@ -27,13 +27,15 @@ export function setDefaultInputs(
     'path-to-signatures': 'signatures/v1/cla.json',
     'path-to-document': 'https://example.com/cla',
     branch: 'main',
-    allowlist: 'dependabot[bot],*[bot]',
+    allowlist: '',
+    'allowlist-ids': '',
     'remote-organization-name': '',
     'remote-repository-name': '',
     'create-file-commit-message': 'Creating file for storing CLA Signatures',
     'signed-commit-message': '$contributorName has signed the CLA',
     'use-dco-flag': 'false',
-    'lock-pullrequest-aftermerge': 'true'
+    'lock-pullrequest-aftermerge': 'true',
+    'rerun-workflow': 'false'
   }
   for (const [k, v] of Object.entries({ ...defaults, ...overrides })) {
     if (v !== undefined) setInput(k, v)

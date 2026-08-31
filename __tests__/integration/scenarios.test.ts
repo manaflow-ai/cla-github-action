@@ -36,7 +36,8 @@ describe('CLA action end-to-end scenarios', () => {
     setDefaultInputs({
       'path-to-signatures': 'signatures/cla.json',
       branch: 'main',
-      allowlist: '*[bot]'
+      allowlist: '',
+      'allowlist-ids': ''
     })
     fake = installFakeGitHub()
   })
@@ -101,7 +102,15 @@ describe('CLA action end-to-end scenarios', () => {
     })
     fake
       .repo('acme', 'widgets')
-      .addWorkflow('cla-check', [{ id: 777, conclusion: 'failure' }])
+      .addWorkflow('cla-check', [
+        {
+          id: 777,
+          conclusion: 'failure',
+          head_sha: 'headsha',
+          event: 'pull_request_target',
+          pull_requests: [{ number: 7 }]
+        }
+      ])
 
     setContext({
       owner: 'acme',
@@ -135,9 +144,7 @@ describe('CLA action end-to-end scenarios', () => {
       .find(c => c.user.login === 'github-actions[bot]')!
     expect(bot.body).toMatch(/all contributors have signed the cla/i)
 
-    expect(fake.recordedRerunRequests).toEqual([
-      { owner: 'acme', repo: 'widgets', runId: 777 }
-    ])
+    expect(fake.recordedRerunRequests).toEqual([])
   })
 
   it('Already-signed contributor opens a PR with no prior bot comment: posts an all-signed comment, file untouched', async () => {
@@ -189,7 +196,8 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('Dependabot PR: allow-listed, skipped entirely, check passes', async () => {
+  it('Dependabot PR: numeric-ID allow-listed, skipped entirely, check passes', async () => {
+    setInput('allowlist-ids', '49699333')
     fake.repo('acme', 'widgets').addPullRequest({
       number: 9,
       head: { sha: 'headsha', ref: 'deps/bump' },
@@ -381,6 +389,7 @@ describe('CLA action end-to-end scenarios', () => {
       commits: [
         {
           author: { login: 'alice', id: 1001 },
+          coAuthors: [{ login: 'bob', name: 'Bob', id: 2002 }],
           message:
             'Implement thing\n\nBody of commit.\n\nCo-authored-by: Bob <2002+bob@users.noreply.github.com>'
         }
@@ -432,6 +441,7 @@ describe('CLA action end-to-end scenarios', () => {
       commits: [
         {
           author: { login: 'alice', id: 1001 },
+          coAuthors: [{ login: 'bob', name: 'Bob', id: 2002 }],
           message:
             'Implement thing\n\nCo-authored-by: Bob <2002+bob@users.noreply.github.com>'
         }
@@ -481,6 +491,7 @@ describe('CLA action end-to-end scenarios', () => {
       commits: [
         {
           author: { login: 'alice', id: 1001 },
+          coAuthors: [{ name: 'Carol', email: 'carol@example.com' }],
           message: 'Fix\n\nCo-authored-by: Carol <carol@example.com>'
         }
       ]
@@ -599,6 +610,130 @@ describe('CLA action end-to-end scenarios', () => {
     const body = fake.repo('acme', 'widgets').listComments(17)[0]!.body
     expect(body).toContain('[!NOTE]')
     expect(body).not.toContain('[!CAUTION]')
+    watch.restore()
+  })
+
+  it('requires both the commit author and a different committer to sign', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 18,
+      head: { sha: 'headsha', ref: 'feature/separate-committer' },
+      commits: [
+        {
+          author: { login: 'alice', id: 1001 },
+          committer: { login: 'bob', id: 2002 }
+        }
+      ]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 18,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 18,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    const body = fake.repo('acme', 'widgets').listComments(18)[0]!.body
+    expect(body).toContain(':x: @bob')
+    expect(watch.failures.join('\n')).toMatch(
+      /Committers of Pull Request number 18/
+    )
+    watch.restore()
+  })
+
+  it('does not silently remove a GitHub Actions bot commit identity', async () => {
+    const watch = watchCore()
+    setInput('require-opener-as-author', 'false')
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 19,
+      head: { sha: 'headsha', ref: 'automation/generated' },
+      commits: [
+        {
+          author: { login: 'github-actions[bot]', id: 41898282 },
+          committer: { login: 'alice', id: 1001 }
+        }
+      ]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 19,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 19,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    const body = fake.repo('acme', 'widgets').listComments(19)[0]!.body
+    expect(body).toContain(':x: @github-actions[bot]')
+    expect(watch.failures.join('\n')).toMatch(
+      /Committers of Pull Request number 19/
+    )
+    watch.restore()
+  })
+
+  it('fails closed when GitHub reports more than 100 authors on one commit', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 20,
+      head: { sha: 'headsha', ref: 'feature/too-many-authors' },
+      commits: [
+        {
+          author: { login: 'alice', id: 1001 },
+          authorsHasNextPage: true
+        }
+      ]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 20,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 20,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/more than 100 authors/i)
+    expect(fake.repo('acme', 'widgets').listComments(20)).toHaveLength(0)
     watch.restore()
   })
 })

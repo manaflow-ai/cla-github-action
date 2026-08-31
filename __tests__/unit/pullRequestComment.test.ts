@@ -31,6 +31,20 @@ function listCommentsInterceptor(
     .times(times)
 }
 
+function canonicalBotInterceptor(http: MockAgentHarness) {
+  http
+    .github()
+    .intercept({
+      path: /\/users\/github-actions(?:%5B|\[)bot(?:%5D|\])$/i,
+      method: 'GET'
+    })
+    .reply(
+      200,
+      { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+      { headers: { 'content-type': 'application/json' } }
+    )
+}
+
 describe('prCommentSetup', () => {
   let http: MockAgentHarness
 
@@ -96,6 +110,7 @@ describe('prCommentSetup', () => {
   })
 
   it('finds the existing bot comment by the "CLA Assistant Lite bot" marker and updates it', async () => {
+    canonicalBotInterceptor(http)
     listCommentsInterceptor(
       http,
       [
@@ -108,7 +123,7 @@ describe('prCommentSetup', () => {
         {
           id: 777,
           body: 'something **CLA Assistant Lite bot** says',
-          user: { login: 'github-actions[bot]', id: 99 },
+          user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
           created_at: '2024-01-02'
         }
       ],
@@ -142,6 +157,7 @@ describe('prCommentSetup', () => {
 
   it('finds the DCO bot comment when use-dco-flag is true', async () => {
     setDefaultInputs({ 'use-dco-flag': 'true' })
+    canonicalBotInterceptor(http)
     listCommentsInterceptor(
       http,
       [
@@ -154,7 +170,7 @@ describe('prCommentSetup', () => {
         {
           id: 555,
           body: '**DCO Assistant Lite bot**: content',
-          user: { login: 'github-actions[bot]', id: 99 },
+          user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
           created_at: '2024-01-02'
         }
       ],
@@ -182,6 +198,46 @@ describe('prCommentSetup', () => {
       },
       [{ name: 'alice', id: 1, pullRequestNo: 42 }]
     )
+    http.assertClean()
+  })
+
+  it('rejects a spoofed marker comment and creates a new trusted marker', async () => {
+    canonicalBotInterceptor(http)
+    listCommentsInterceptor(http, [
+      {
+        id: 666,
+        body: 'spoofed **CLA Assistant Lite bot** marker',
+        user: { login: 'mallory', id: 9001, type: 'User' },
+        created_at: '2024-01-01'
+      }
+    ])
+    const captured = captureJson(
+      http.github(),
+      { path: '/repos/acme/widgets/issues/42/comments', method: 'POST' },
+      {
+        status: 201,
+        body: {
+          id: 999,
+          user: {
+            login: 'github-actions[bot]',
+            id: 41898282,
+            type: 'Bot'
+          }
+        }
+      }
+    )
+
+    const prCommentSetup = loadModule()
+    await prCommentSetup(
+      {
+        signed: [],
+        notSigned: [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+        unknown: []
+      },
+      [{ name: 'alice', id: 1, pullRequestNo: 42 }]
+    )
+
+    expect(captured.body.body).toContain('CLA Assistant Lite bot')
     http.assertClean()
   })
 })
