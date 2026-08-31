@@ -73,7 +73,7 @@ jobs:
           fi
       - name: "CLA Assistant v2"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@226beae099386eaa16d68897d511adb314d2e6d7
+        uses: manaflow-ai/cla-github-action@034cf5a6318f511e886a06188ff024b9471d6511
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only set this token for a remote signature repository. Prefer a
@@ -149,7 +149,7 @@ The action re-fetches accepted signing comments immediately before a ledger writ
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: manaflow-ai/cla-github-action@226beae099386eaa16d68897d511adb314d2e6d7
+> uses: manaflow-ai/cla-github-action@034cf5a6318f511e886a06188ff024b9471d6511
 > ```
 >
 > Tools like [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
