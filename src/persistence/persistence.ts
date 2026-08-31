@@ -56,7 +56,8 @@ export async function createFile(contentBinary: string): Promise<any> {
 export async function updateFile(
   sha: string,
   claFileContent: ClaFileContent,
-  reactedCommitters: ReactedCommitterMap
+  reactedCommitters: ReactedCommitterMap,
+  beforeWrite?: () => Promise<void>
 ): Promise<void> {
   const t = resolveSignaturesTarget()
   const pullRequestNo = context.issue.number
@@ -82,6 +83,11 @@ export async function updateFile(
     const contentBinary = Buffer.from(serialized).toString('base64')
 
     try {
+      // A contents conflict means another PR committed between our reads.
+      // Re-run the caller's live PR and comment checks before every attempt so
+      // a force-push or edited/deleted declaration cannot be carried into the
+      // optimistic retry.
+      await beforeWrite?.()
       await t.octokit.rest.repos.createOrUpdateFileContents({
         owner: t.owner,
         repo: t.repo,

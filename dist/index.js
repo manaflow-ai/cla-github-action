@@ -48472,7 +48472,7 @@ async function createFile(contentBinary) {
         branch: t.branch
     });
 }
-async function updateFile(sha, claFileContent, reactedCommitters) {
+async function updateFile(sha, claFileContent, reactedCommitters, beforeWrite) {
     const t = resolveSignaturesTarget();
     const pullRequestNo = github_context.issue.number;
     let currentSha = sha;
@@ -48493,6 +48493,11 @@ async function updateFile(sha, claFileContent, reactedCommitters) {
         }
         const contentBinary = Buffer.from(serialized).toString('base64');
         try {
+            // A contents conflict means another PR committed between our reads.
+            // Re-run the caller's live PR and comment checks before every attempt so
+            // a force-push or edited/deleted declaration cannot be carried into the
+            // optimistic retry.
+            await beforeWrite?.();
             await t.octokit.rest.repos.createOrUpdateFileContents({
                 owner: t.owner,
                 repo: t.repo,
@@ -49292,7 +49297,10 @@ async function setupClaCheck() {
             /* pushing the recently signed  contributors to the CLA Json File */
             await validateSigningCommentsUnchanged(pullRequestComments, reactedCommitters.newSigned);
             await validateLivePullRequest(livePullRequest);
-            await updateFile(sha, claFileContent, reactedCommitters);
+            await updateFile(sha, claFileContent, reactedCommitters, async () => {
+                await validateSigningCommentsUnchanged(pullRequestComments, reactedCommitters.newSigned);
+                await validateLivePullRequest(livePullRequest);
+            });
             setOutput('signature_recorded', true);
         }
         if (reactedCommitters?.allSignedFlag ||

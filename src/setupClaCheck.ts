@@ -76,7 +76,13 @@ export async function setupClaCheck() {
         reactedCommitters.newSigned
       )
       await validateLivePullRequest(livePullRequest)
-      await updateFile(sha, claFileContent, reactedCommitters)
+      await updateFile(sha, claFileContent, reactedCommitters, async () => {
+        await validateSigningCommentsUnchanged(
+          pullRequestComments,
+          reactedCommitters.newSigned
+        )
+        await validateLivePullRequest(livePullRequest)
+      })
       core.setOutput('signature_recorded', true)
     }
     if (

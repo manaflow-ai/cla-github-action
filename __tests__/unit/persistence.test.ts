@@ -240,15 +240,20 @@ describe('persistence', () => {
       )
 
       const { updateFile } = loadPersistence()
+      let validationCalls = 0
       await updateFile(
         'oldsha',
         { signedContributors: [{ name: 'alice', id: 1 }] },
         {
           newSigned: [{ name: 'bob', id: 2 }],
           allSignedFlag: true
-        } as any
+        } as any,
+        async () => {
+          validationCalls += 1
+        }
       )
 
+      expect(validationCalls).toBe(2)
       expect(captured.body?.sha).toBe('latestsha')
       const decoded = JSON.parse(
         Buffer.from(captured.body!.content, 'base64').toString()
