@@ -233,7 +233,7 @@ describe('prCommentSetup', () => {
     http.assertClean()
   })
 
-  it('rejects a marker when the canonical login resolves to an unexpected account ID', async () => {
+  it('accepts an instance-specific canonical Actions bot ID', async () => {
     http
       .github()
       .intercept({
@@ -253,19 +253,28 @@ describe('prCommentSetup', () => {
         created_at: '2024-01-01'
       }
     ]
+    http
+      .github()
+      .intercept({
+        path: '/repos/acme/widgets/issues/comments/666',
+        method: 'PATCH'
+      })
+      .reply(
+        200,
+        { id: 666 },
+        { headers: { 'content-type': 'application/json' } }
+      )
 
     const prCommentSetup = loadModule()
-    await expect(
-      prCommentSetup(
-        {
-          signed: [],
-          notSigned: [{ name: 'alice', id: 1, pullRequestNo: 42 }],
-          unknown: []
-        },
-        [{ name: 'alice', id: 1, pullRequestNo: 42 }],
-        comments
-      )
-    ).rejects.toThrow('Could not retrieve or verify CLA bot comments')
+    await prCommentSetup(
+      {
+        signed: [],
+        notSigned: [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+        unknown: []
+      },
+      [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+      comments
+    )
     http.assertClean()
   })
 

@@ -166,6 +166,45 @@ describe('bug fixes', () => {
       )
       watch.restore()
     })
+
+    it('passes when the first Pull Request opener is allowlisted', async () => {
+      const watch = watchCore()
+      const repository = fake.repo('acme', 'widgets')
+      setInput('allowlist-ids', '49699333')
+      repository.addPullRequest({
+        number: 10,
+        head: { sha: 'headsha', ref: 'deps/bootstrap' },
+        user: { login: 'dependabot[bot]', id: 49699333 },
+        commits: [{ author: { login: 'dependabot[bot]', id: 49699333 } }]
+      })
+      setContext({
+        owner: 'acme',
+        repo: 'widgets',
+        issueNumber: 10,
+        actor: 'dependabot[bot]',
+        eventName: 'pull_request_target',
+        payload: {
+          action: 'opened',
+          pull_request: {
+            number: 10,
+            state: 'open',
+            user: { login: 'dependabot[bot]', id: 49699333 }
+          },
+          repository: { id: repository.state.id }
+        }
+      })
+
+      await runAction()
+
+      expect(repository.getFile('signatures/cla.json')).toEqual({
+        signedContributors: []
+      })
+      expect(repository.listComments(10)[0]?.body).toMatch(
+        /all contributors have signed the cla/i
+      )
+      expect(watch.failures).toEqual([])
+      watch.restore()
+    })
   })
 
   describe('C3: already-signed contributor with no prior bot comment gets feedback', () => {
