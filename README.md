@@ -150,6 +150,8 @@ If the signature ledger does not exist, the first run creates an empty ledger an
 
 If two Pull Requests try to create the first ledger together, the losing run makes at most three safe reads. It continues only when a read confirms a valid ledger. Otherwise it fails closed. An unsigned contributor stays pending, and a valid signing declaration can reach all-signed status only after the confirmed ledger records it.
 
+The ledger is shared by all Pull Requests. Each signer workflow can use a per-Pull Request concurrency group, while the action uses bounded optimistic locking for cross-Pull Request writes. On a contents conflict it re-reads the ledger, merges the new signature, revalidates the live Pull Request and signing comment, and retries at most three writes. Persistent contention or an invalid read fails closed, so a contributor must post `recheck` after the queue is available. Extreme concurrent signing can therefore delay availability, but it cannot cause an unbounded runner loop or discard an already committed signature.
+
 The action re-fetches accepted signing comments immediately before a ledger write. It rejects a comment that was edited, deleted, or moved to another identity during the run. GitHub does not provide one transaction for comments and repository contents, so a short race remains between this final check and the ledger write.
 
 > [!IMPORTANT]

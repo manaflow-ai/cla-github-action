@@ -96,6 +96,12 @@ commit that introduced it.
 - When two Pull Requests create the first ledger together, a 409 or 422 create
   response starts at most three safe reads. The action continues only after it
   confirms a valid ledger. Other create failures still fail closed.
+- The shared ledger uses bounded optimistic locking for later cross-Pull Request
+  writes. A contents conflict re-reads the ledger, merges the new signature,
+  revalidates the live Pull Request and signing comment, and retries at most
+  three writes. Persistent contention fails closed and may require a later
+  `recheck`; it cannot cause an unbounded runner loop or discard a committed
+  signature.
 
 ### Changed
 
