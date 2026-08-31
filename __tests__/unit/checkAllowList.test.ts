@@ -1,123 +1,88 @@
+import * as core from '@actions/core'
 import { resetEnv, setInput } from '../testHelpers/env'
 import { checkAllowList } from '../../src/checkAllowList'
 import { Committer } from '../../src/interfaces'
 
-function committer(name: string, email?: string): Committer {
-  return { name, id: 0, pullRequestNo: 1, ...(email ? { email } : {}) }
+function committer(
+  name: string,
+  id: number,
+  email?: string,
+  isPullRequestOpener = false
+): Committer {
+  return {
+    name,
+    id,
+    pullRequestNo: 1,
+    ...(email ? { email } : {}),
+    isPullRequestOpener
+  }
 }
 
 describe('checkAllowList', () => {
-  afterEach(resetEnv)
-
-  it('filters out committers whose login matches an exact allow-list entry', () => {
-    setInput('allowlist', 'alice,bob')
-    const result = checkAllowList([committer('alice'), committer('carol')])
-    expect(result.map(c => c.name)).toEqual(['carol'])
+  afterEach(() => {
+    jest.restoreAllMocks()
+    resetEnv()
   })
 
-  it('filters out committers matching a glob pattern', () => {
-    setInput('allowlist', '*[bot]')
+  it('exempts only the authenticated live opener with a configured ID', () => {
+    setInput('allowlist-ids', '1001, 2002')
     const result = checkAllowList([
-      committer('dependabot[bot]'),
-      committer('renovate[bot]'),
-      committer('alice')
+      committer('alice', 1001, undefined, true),
+      committer('bob', 2002),
+      committer('carol', 3003)
     ])
-    expect(result.map(c => c.name)).toEqual(['alice'])
+    expect(result.map(c => c.name)).toEqual(['bob', 'carol'])
   })
 
-  it('supports a prefix glob', () => {
-    setInput('allowlist', 'acme-*')
+  it('does not exempt a matching raw login or email from the deprecated allowlist', () => {
+    const warning = jest.spyOn(core, 'warning').mockImplementation(() => {})
+    setInput('allowlist', 'alice,*[bot],noreply@example.com')
+    const committers = [
+      committer('alice', 1001),
+      committer('dependabot[bot]', 49699333),
+      committer('service', 4004, 'noreply@example.com')
+    ]
+
+    expect(checkAllowList(committers)).toEqual(committers)
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringMatching(/allowlist.*ignored.*allowlist-ids/i)
+    )
+  })
+
+  it('ignores malformed and non-positive allowlist IDs with a warning', () => {
+    const warning = jest.spyOn(core, 'warning').mockImplementation(() => {})
+    setInput('allowlist-ids', '1001,bob,0,-2,3.5')
     const result = checkAllowList([
-      committer('acme-bot'),
-      committer('acme-svc'),
-      committer('widgets-bot')
+      committer('alice', 1001, undefined, true),
+      committer('bob', 2002)
     ])
-    expect(result.map(c => c.name)).toEqual(['widgets-bot'])
+
+    expect(result.map(c => c.name)).toEqual(['bob'])
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringMatching(/invalid allowlist-ids/i)
+    )
   })
 
-  it('treats regex metacharacters in patterns as literal', () => {
-    setInput('allowlist', 'user.name+tag')
+  it('does not exempt an unlinked identity with id zero', () => {
+    setInput('allowlist-ids', '0')
     expect(
-      checkAllowList([
-        committer('user.name+tag'),
-        committer('userXnameYtag')
-      ]).map(c => c.name)
-    ).toEqual(['userXnameYtag'])
+      checkAllowList([committer('Mystery', 0, 'mystery@example.com')])
+    ).toHaveLength(1)
   })
 
-  it('trims whitespace around comma-separated entries', () => {
-    setInput('allowlist', ' alice , bob ')
-    expect(
-      checkAllowList([
-        committer('alice'),
-        committer('bob'),
-        committer('carol')
-      ]).map(c => c.name)
-    ).toEqual(['carol'])
-  })
-
-  it('returns an empty list when every committer is allow-listed', () => {
-    setInput('allowlist', 'alice,bob')
-    expect(checkAllowList([committer('alice'), committer('bob')])).toEqual([])
-  })
-
-  it('returns the full list when the allow-list does not match anyone', () => {
-    setInput('allowlist', 'zack')
-    const committers = [committer('alice'), committer('bob')]
+  it('returns the full list when allowlist-ids is empty', () => {
+    setInput('allowlist-ids', '')
+    const committers = [committer('alice', 1001), committer('bob', 2002)]
     expect(checkAllowList(committers)).toEqual(committers)
   })
 
-  it('skips null/undefined committers', () => {
-    setInput('allowlist', '')
+  it('skips null and undefined entries without creating an exemption', () => {
+    setInput('allowlist-ids', '')
     const result = checkAllowList([
-      committer('alice'),
+      committer('alice', 1001),
       null as unknown as Committer,
       undefined as unknown as Committer
     ])
     expect(result.map(c => c.name)).toEqual(['alice'])
-  })
-
-  it('with an empty allow-list input still filters out committers matching the literal empty pattern only if login is exactly empty', () => {
-    setInput('allowlist', '')
-    expect(
-      checkAllowList([committer(''), committer('alice')]).map(c => c.name)
-    ).toEqual(['alice'])
-  })
-
-  it('filters out committers whose email matches an exact allow-list entry', () => {
-    setInput('allowlist', 'noreply@anthropic.com')
-    const result = checkAllowList([
-      committer('Claude Opus 4.7', 'noreply@anthropic.com'),
-      committer('alice', 'alice@example.com')
-    ])
-    expect(result.map(c => c.name)).toEqual(['alice'])
-  })
-
-  it('filters out committers whose email matches a glob entry', () => {
-    setInput('allowlist', '*@anthropic.com')
-    const result = checkAllowList([
-      committer('Claude Opus 4.7', 'noreply@anthropic.com'),
-      committer('Claude Sonnet', 'assistant@anthropic.com'),
-      committer('alice', 'alice@example.com')
-    ])
-    expect(result.map(c => c.name)).toEqual(['alice'])
-  })
-
-  it('still filters by name when only the name matches the allow-list', () => {
-    setInput('allowlist', 'iainmcgin')
-    const result = checkAllowList([
-      committer('iainmcgin', 'iain@example.com'),
-      committer('alice', 'alice@example.com')
-    ])
-    expect(result.map(c => c.name)).toEqual(['alice'])
-  })
-
-  it('does not match committers without an email against an email allow-list entry', () => {
-    setInput('allowlist', 'noreply@anthropic.com')
-    const result = checkAllowList([
-      committer('alice'),
-      committer('bob', 'bob@example.com')
-    ])
-    expect(result.map(c => c.name)).toEqual(['alice', 'bob'])
   })
 })

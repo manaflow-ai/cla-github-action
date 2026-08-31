@@ -61,7 +61,9 @@ function defaultInputEnv(
     'INPUT_PATH-TO-SIGNATURES': 'signatures/cla.json',
     'INPUT_PATH-TO-DOCUMENT': 'https://example.com/cla',
     INPUT_BRANCH: 'main',
-    INPUT_ALLOWLIST: '*[bot]',
+    'INPUT_REQUIRED-BASE-REF': 'main',
+    INPUT_ALLOWLIST: '',
+    'INPUT_ALLOWLIST-IDS': '',
     'INPUT_USE-DCO-FLAG': 'false',
     'INPUT_LOCK-PULLREQUEST-AFTERMERGE': 'true'
   }
@@ -101,6 +103,48 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
     await fake.close()
   })
 
+  it('bundled action rejects a non-HTTPS document URL before GitHub writes', async () => {
+    const repositoryId = fake.repo('acme', 'widgets').state.id
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 7,
+      head: { sha: 'headsha', ref: 'feature/cla' },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake
+      .repo('acme', 'widgets')
+      .setFile('signatures/cla.json', { signedContributors: [] })
+    const eventPath = writeEventFile({
+      action: 'opened',
+      pull_request: {
+        number: 7,
+        state: 'open',
+        head: {
+          sha: 'headsha',
+          ref: 'feature/cla',
+          repo: { id: repositoryId, full_name: 'acme/widgets' }
+        },
+        base: {
+          ref: 'main',
+          repo: { id: repositoryId, full_name: 'acme/widgets' }
+        }
+      },
+      repository: { id: repositoryId, full_name: 'acme/widgets' }
+    })
+
+    const result = await runDist({
+      ...defaultInputEnv({
+        'INPUT_PATH-TO-DOCUMENT': 'http://example.com/cla'
+      }),
+      ...githubEnv(fake, { eventName: 'pull_request_target', eventPath })
+    })
+
+    expect(result.stdout).toMatch(
+      /::error::.*path-to-document.*non-empty absolute HTTPS URL/i
+    )
+    expect(result.code).toBe(1)
+    expect(fake.repo('acme', 'widgets').listComments(7)).toHaveLength(0)
+  }, 20000)
+
   it('bundled action posts a notice comment and reports failure for an unsigned contributor', async () => {
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
@@ -113,8 +157,29 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
 
     const eventPath = writeEventFile({
       action: 'opened',
-      pull_request: { number: 7, state: 'open' },
-      repository: { id: fake.repo('acme', 'widgets').state.id }
+      pull_request: {
+        number: 7,
+        state: 'open',
+        head: {
+          sha: 'headsha',
+          ref: 'feature/test',
+          repo: {
+            id: fake.repo('acme', 'widgets').state.id,
+            full_name: 'acme/widgets'
+          }
+        },
+        base: {
+          ref: 'main',
+          repo: {
+            id: fake.repo('acme', 'widgets').state.id,
+            full_name: 'acme/widgets'
+          }
+        }
+      },
+      repository: {
+        id: fake.repo('acme', 'widgets').state.id,
+        full_name: 'acme/widgets'
+      }
     })
 
     const result = await runDist({
@@ -134,7 +199,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
     expect(comments[0]!.body).toMatch(/CLA Assistant Lite bot/)
   }, 20000)
 
-  it('bundled action writes a new signature and requests a workflow rerun when a contributor signs via comment', async () => {
+  it('bundled action writes a signature and leaves reruns to an exact-head workflow job', async () => {
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
       head: { sha: 'headsha', ref: 'feature/cla' },
@@ -145,11 +210,11 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
       .setFile('signatures/cla.json', { signedContributors: [] })
     fake.repo('acme', 'widgets').addComment(7, {
       body: 'something **CLA Assistant Lite bot** says',
-      user: { login: 'github-actions[bot]', id: 41898282 }
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
     })
     fake.repo('acme', 'widgets').addComment(7, {
       body: 'I have read the CLA Document and I hereby sign the CLA',
-      user: { login: 'alice', id: 1001 }
+      user: { login: 'alice', id: 1001, type: 'User' }
     })
     fake
       .repo('acme', 'widgets')
@@ -157,12 +222,15 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
 
     const eventPath = writeEventFile({
       action: 'created',
-      issue: { number: 7, pull_request: {} },
+      issue: { number: 7, state: 'open', pull_request: {} },
       comment: {
         body: 'I have read the CLA Document and I hereby sign the CLA',
-        user: { login: 'alice', id: 1001 }
+        user: { login: 'alice', id: 1001, type: 'User' }
       },
-      repository: { id: fake.repo('acme', 'widgets').state.id }
+      repository: {
+        id: fake.repo('acme', 'widgets').state.id,
+        full_name: 'acme/widgets'
+      }
     })
 
     const result = await runDist({
@@ -179,20 +247,46 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
       'alice'
     )
 
-    expect(fake.recordedRerunRequests).toEqual([
-      { owner: 'acme', repo: 'widgets', runId: 777 }
-    ])
+    expect(fake.recordedRerunRequests).toEqual([])
   }, 20000)
 
   it('bundled action calls the lock endpoint on a merged PR close event', async () => {
+    const repositoryId = fake.repo('acme', 'widgets').state.id
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 10,
+      head: {
+        sha: 'headsha',
+        ref: 'feature/merged',
+        apiRef: 'feature/merged'
+      },
+      user: { login: 'alice', id: 1001 },
+      merged: true,
+      state: 'closed',
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
     const eventPath = writeEventFile({
       action: 'closed',
-      pull_request: { number: 10, merged: true }
+      pull_request: {
+        number: 10,
+        state: 'closed',
+        merged: true,
+        head: {
+          sha: 'headsha',
+          ref: 'feature/merged',
+          repo: { full_name: 'acme/widgets', id: repositoryId }
+        },
+        base: {
+          ref: 'main',
+          repo: { full_name: 'acme/widgets', id: repositoryId }
+        },
+        user: { login: 'alice', id: 1001 }
+      },
+      repository: { id: repositoryId, full_name: 'acme/widgets' }
     })
 
     const result = await runDist({
       ...defaultInputEnv(),
-      ...githubEnv(fake, { eventName: 'pull_request', eventPath })
+      ...githubEnv(fake, { eventName: 'pull_request_target', eventPath })
     })
 
     expect(result.code).toBe(0)

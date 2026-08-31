@@ -9,17 +9,24 @@ inputs:
     description: "Give a path for storing CLAs in a json file "
     default: "./signatures/cla.json"
   branch:
-    description: "provide a branch where all the CLAs are stored"
+    description: "Branch where signatures are stored. Restrict writes to trusted CLA automation and ensure its token can write."
     default: "master"
+  required-base-ref:
+    description: "Pull Request base branch allowed to write signatures or be locked after merge. Repositories that accept contributions to another branch must override the secure main default."
+    default: "main"
   allowlist:
-    description: "users in the allow list don't have to sign the CLA document"
+    description: "Deprecated and ignored. Raw names, emails, and globs can be spoofed in commit metadata."
+    default: ""
+  allowlist-ids:
+    description: "Comma-separated numeric GitHub user IDs. An ID is exempt only when the live Pull Request API authenticates it as the opener. Commit-derived identities are never exempt."
     default: ""
   remote-repository-name:
     description: "provide the remote repository name where all the signatures should be stored"
   remote-organization-name:
     description: "provide the remote organization name where all the signatures should be stored"
   path-to-document:
-    description: "Fully qualified web link to the document - example: https://github.com/cla-assistant/github-action/blob/master/SAPCLA.md"
+    description: "Non-empty absolute HTTPS URL for the CLA or DCO document"
+    required: true
   signed-commit-message:
     description: "Commit message when a new contributor signs the CLA in a PR"
   create-file-commit-message:
@@ -50,6 +57,11 @@ inputs:
       style contribution workflows).
     default: "true"
 outputs:
+  signature_recorded:
+    description: >
+      Set to 'true' only when this run accepted a new Pull Request signing
+      comment and persisted that signature in the ledger. Consumers can use
+      this output to authorize a narrowly scoped post-signature check refresh.
   opener_not_in_commits:
     description: >
       Set to 'true' when the Pull Request opener is not recorded as an author

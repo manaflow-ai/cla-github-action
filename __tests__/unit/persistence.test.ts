@@ -170,5 +170,113 @@ describe('persistence', () => {
 
       expect(captured.body.message).toBe('alice signed CLA on acme/widgets#42')
     })
+
+    it('deduplicates stored and newly observed signatures by verified user ID', async () => {
+      const captured = captureJson(
+        http.github(),
+        {
+          path: '/repos/acme/widgets/contents/signatures%2Fv1%2Fcla.json',
+          method: 'PUT'
+        },
+        { status: 200, body: { content: { sha: 'new' } } }
+      )
+
+      const { updateFile } = loadPersistence()
+      await updateFile(
+        'oldsha',
+        { signedContributors: [{ name: 'alice', id: 1 }] },
+        {
+          newSigned: [
+            { name: 'alice-renamed', id: 1 },
+            { name: 'bob', id: 2 },
+            { name: 'bob-again', id: 2 }
+          ],
+          allSignedFlag: true
+        } as any
+      )
+
+      const decoded = JSON.parse(
+        Buffer.from(captured.body.content, 'base64').toString()
+      )
+      expect(decoded.signedContributors).toEqual([
+        { name: 'alice', id: 1 },
+        { name: 'bob', id: 2 }
+      ])
+    })
+
+    it('merges a concurrent ledger update after a contents conflict', async () => {
+      http
+        .github()
+        .intercept({
+          path: '/repos/acme/widgets/contents/signatures%2Fv1%2Fcla.json',
+          method: 'PUT'
+        })
+        .reply(409, { message: 'sha does not match' })
+      http
+        .github()
+        .intercept({
+          path: '/repos/acme/widgets/contents/signatures%2Fv1%2Fcla.json?ref=main',
+          method: 'GET'
+        })
+        .reply(
+          200,
+          {
+            sha: 'latestsha',
+            content: Buffer.from(
+              JSON.stringify({
+                signedContributors: [{ name: 'carol', id: 3 }]
+              })
+            ).toString('base64')
+          },
+          { headers: { 'content-type': 'application/json' } }
+        )
+      const captured = captureJson(
+        http.github(),
+        {
+          path: '/repos/acme/widgets/contents/signatures%2Fv1%2Fcla.json',
+          method: 'PUT'
+        },
+        { status: 200, body: { content: { sha: 'new' } } }
+      )
+
+      const { updateFile } = loadPersistence()
+      let validationCalls = 0
+      await updateFile(
+        'oldsha',
+        { signedContributors: [{ name: 'alice', id: 1 }] },
+        {
+          newSigned: [{ name: 'bob', id: 2 }],
+          allSignedFlag: true
+        } as any,
+        async () => {
+          validationCalls += 1
+        }
+      )
+
+      expect(validationCalls).toBe(2)
+      expect(captured.body?.sha).toBe('latestsha')
+      const decoded = JSON.parse(
+        Buffer.from(captured.body!.content, 'base64').toString()
+      )
+      expect(decoded.signedContributors).toEqual([
+        { name: 'carol', id: 3 },
+        { name: 'bob', id: 2 }
+      ])
+      http.assertClean()
+    })
+
+    it('rejects a serialized ledger larger than 1000000 bytes before writing', async () => {
+      const { updateFile } = loadPersistence()
+      await expect(
+        updateFile('oldsha', { signedContributors: [] }, {
+          newSigned: [{ name: 'x'.repeat(1_000_001), id: 2 }],
+          allSignedFlag: false,
+          signed: [],
+          notSigned: [],
+          unknown: []
+        } as any)
+      ).rejects.toThrow(/larger than 1000000 bytes/i)
+      http.assertClean()
+    })
   })
 })

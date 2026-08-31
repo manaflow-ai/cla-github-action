@@ -1,41 +1,41 @@
 import { context } from '@actions/github'
 import { setupClaCheck } from './setupClaCheck'
-import {
-  lockPullRequest,
-  unlockPullRequest
-} from './pullrequest/pullRequestLock'
+import { lockPullRequest } from './pullrequest/pullRequestLock'
 
 import * as core from '@actions/core'
 import * as input from './shared/getInputs'
+import { validateMergedPullRequestForLock } from './livePullRequest'
+import { requireHttpsDocumentUrl } from './shared/documentUrl'
 
 export async function run() {
   try {
     core.info(`CLA Assistant GitHub Action bot has started the process`)
 
-    if (
-      context.payload.action === 'closed' &&
-      input.lockPullRequestAfterMerge()
-    ) {
-      if (context.payload.pull_request?.merged) {
-        return lockPullRequest()
+    requireHttpsDocumentUrl()
+
+    if (context.payload.action === 'closed') {
+      if (
+        input.lockPullRequestAfterMerge() &&
+        context.payload.pull_request?.merged
+      ) {
+        await validateMergedPullRequestForLock()
+        await lockPullRequest()
+        return
       }
-      core.info(
-        `Pull request ${context.issue.number} was closed without merging, not locking it`
-      )
+      const reason = context.payload.pull_request?.merged
+        ? 'automatic locking is disabled'
+        : 'it was not merged'
+      core.info(`Pull request ${context.issue.number} is closed and ${reason}`)
       return
     }
 
-    // A merged PR can never be reopened, so a lock seen here is either left
-    // over from the pre-v3.1 lock-on-any-close bug or was set manually by a
-    // maintainer. We cannot tell the two apart, and the CLA check cannot
-    // complete on a locked PR (the bot cannot comment), so we accept removing
-    // a manual lock as the cost of unsticking the common case.
     if (
       context.payload.action === 'reopened' &&
-      context.payload.pull_request?.locked &&
-      input.lockPullRequestAfterMerge()
+      context.payload.pull_request?.locked
     ) {
-      await unlockPullRequest()
+      core.warning(
+        `Pull request ${context.issue.number} is locked. The action preserves maintainer locks. A maintainer must unlock the conversation before contributors can sign.`
+      )
     }
 
     await setupClaCheck()

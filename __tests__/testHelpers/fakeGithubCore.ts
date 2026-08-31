@@ -13,24 +13,63 @@ export interface FileRecord {
 export interface Comment {
   id: number
   body: string
-  user: { login: string; id: number }
+  user: { login: string; id: number; type?: 'Bot' | 'User' }
   created_at: string
+  updated_at: string
+}
+
+export interface GitActorFixture {
+  login?: string
+  name?: string
+  id?: number
+  email?: string
 }
 
 export interface PullRequest {
   number: number
-  head: { sha: string; ref: string }
+  /** Test-only REST response number override for identity validation. */
+  apiNumber?: number
+  /** Test-only GraphQL head OID override for identity binding coverage. */
+  graphqlHeadRefOid?: string
+  /** Test-only GraphQL totalCount override for fail-closed limit coverage. */
+  reportedCommitTotalCount?: number
+  head: {
+    sha: string
+    ref: string
+    /** REST API head ref; defaults to the context helper's feature/test. */
+    apiRef?: string
+    repoFullName?: string
+    repoId?: number
+    /** Simulate GitHub returning head.repo = null after source deletion. */
+    repoDeleted?: boolean
+  }
+  base?: { ref: string; repoFullName: string; repoId?: number }
+  user?: GitActorFixture
   merged?: boolean
   state?: 'open' | 'closed'
   commits: Array<{
-    author: { login?: string; name?: string; id?: number; email?: string }
+    author: GitActorFixture
+    committer?: GitActorFixture
+    coAuthors?: GitActorFixture[]
+    authorsHasNextPage?: boolean
     message?: string
   }>
 }
 
 export interface WorkflowRun {
   id: number
-  conclusion: 'success' | 'failure' | null
+  conclusion:
+    | 'success'
+    | 'failure'
+    | 'cancelled'
+    | 'timed_out'
+    | 'action_required'
+    | 'stale'
+    | 'startup_failure'
+    | null
+  head_sha?: string
+  event?: string
+  pull_requests?: Array<{ number: number }>
 }
 
 export interface Workflow {
@@ -55,7 +94,7 @@ export interface FakeRepoHandle {
   addPullRequest(pr: PullRequest): FakeRepoHandle
   addComment(
     issueNumber: number,
-    comment: Omit<Comment, 'id' | 'created_at'>
+    comment: Omit<Comment, 'id' | 'created_at' | 'updated_at'>
   ): Comment
   listComments(issueNumber: number): Comment[]
   isLocked(issueNumber: number): boolean
@@ -75,6 +114,8 @@ export interface FaultInjection {
   status: number
   body?: string
   headers?: Record<string, string>
+  /** Let this many matching requests pass before returning the injected response. */
+  skip?: number
   times: number
 }
 
@@ -240,13 +281,45 @@ export function createFakeGitHubCore(): FakeGitHubCore {
     const owner = decodeURIComponent(m[1]!)
     const name = decodeURIComponent(m[2]!)
     const num = parseInt(m[3]!, 10)
-    const pr = getRepo(owner, name).pulls.get(num)
+    const repository = getRepo(owner, name)
+    const pr = repository.pulls.get(num)
     if (!pr) return notFound()
     return json(200, {
-      number: pr.number,
-      head: pr.head,
+      number: pr.apiNumber ?? pr.number,
+      head: {
+        sha: pr.head.sha,
+        ref: pr.head.apiRef || 'feature/test',
+        repo: pr.head.repoDeleted
+          ? null
+          : {
+              full_name: pr.head.repoFullName || `${owner}/${name}`,
+              id: pr.head.repoId || repository.id
+            }
+      },
+      base: {
+        ref: pr.base?.ref || 'main',
+        repo: {
+          full_name: pr.base?.repoFullName || `${owner}/${name}`,
+          id: pr.base?.repoId || repository.id
+        }
+      },
+      user: (() => {
+        const user = pr.user || pr.commits[0]?.author
+        return user?.login && user.id
+          ? { login: user.login, id: user.id, type: 'User' }
+          : null
+      })(),
       merged: !!pr.merged,
       state: pr.state || 'open'
+    })
+  })
+  addRoute(getRoutes, '/users/:username', m => {
+    const username = decodeURIComponent(m[1]!)
+    if (username.toLowerCase() !== 'github-actions[bot]') return notFound()
+    return json(200, {
+      login: 'github-actions[bot]',
+      id: 41898282,
+      type: 'Bot'
     })
   })
   addRoute(getRoutes, '/repos/:owner/:repo/git/commits/:sha', m => {
@@ -274,7 +347,13 @@ export function createFakeGitHubCore(): FakeGitHubCore {
     if (!wf) return notFound()
     return json(200, {
       total_count: wf.runs.length,
-      workflow_runs: wf.runs.map(r => ({ id: r.id, conclusion: r.conclusion }))
+      workflow_runs: wf.runs.map(r => ({
+        id: r.id,
+        conclusion: r.conclusion,
+        head_sha: r.head_sha,
+        event: r.event,
+        pull_requests: r.pull_requests || []
+      }))
     })
   })
   addRoute(getRoutes, '/repos/:owner/:repo/actions/runs/:id', m => {
@@ -321,11 +400,17 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       const parsed = JSON.parse(body || '{}')
       const repo = getRepo(owner, name)
       const id = repo.nextCommentId++
+      const timestamp = new Date().toISOString()
       const comment: Comment = {
         id,
         body: parsed.body,
-        user: { login: 'github-actions[bot]', id: 41898282 },
-        created_at: new Date().toISOString()
+        user: {
+          login: 'github-actions[bot]',
+          id: 41898282,
+          type: 'Bot'
+        },
+        created_at: timestamp,
+        updated_at: timestamp
       }
       const list = repo.comments.get(num) || []
       list.push(comment)
@@ -366,6 +451,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
         const c = list.find(c => c.id === id)
         if (c) {
           c.body = parsed.body
+          c.updated_at = new Date().toISOString()
           return json(200, c)
         }
       }
@@ -398,22 +484,30 @@ export function createFakeGitHubCore(): FakeGitHubCore {
           }
         }
       })
+    const actor = (a: GitActorFixture) => ({
+      email: a.email || '',
+      name: a.name || a.login || '',
+      user: a.login
+        ? {
+            id: `MDQ6VXNl${a.id}`,
+            databaseId: a.id,
+            login: a.login
+          }
+        : null
+    })
     const edges = pr.commits.map(c => ({
       node: {
         commit: {
           message: c.message || '',
-          author: {
-            email: c.author.email || '',
-            name: c.author.name || c.author.login || '',
-            user: c.author.login
-              ? {
-                  id: `MDQ6VXNl${c.author.id}`,
-                  databaseId: c.author.id,
-                  login: c.author.login
-                }
-              : null
-          },
-          committer: { name: c.author.name || c.author.login || '', user: null }
+          author: actor(c.author),
+          committer: actor(c.committer || c.author),
+          authors: {
+            nodes: [c.author, ...(c.coAuthors || [])].map(actor),
+            pageInfo: {
+              endCursor: c.authorsHasNextPage ? 'author-cursor' : null,
+              hasNextPage: !!c.authorsHasNextPage
+            }
+          }
         }
       },
       cursor: 'c1'
@@ -422,8 +516,9 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       data: {
         repository: {
           pullRequest: {
+            headRefOid: pr.graphqlHeadRefOid ?? pr.head.sha,
             commits: {
-              totalCount: edges.length,
+              totalCount: pr.reportedCommitTotalCount ?? edges.length,
               edges,
               pageInfo: { endCursor: 'c1', hasNextPage: false }
             }
@@ -448,6 +543,10 @@ export function createFakeGitHubCore(): FakeGitHubCore {
         (!f.pathPattern.test(pathname) && !f.pathPattern.test(decoded))
       )
         continue
+      if ((f.skip ?? 0) > 0) {
+        f.skip = (f.skip ?? 0) - 1
+        continue
+      }
       f.times -= 1
       if (f.times <= 0) faults.splice(i, 1)
       return {
@@ -506,9 +605,11 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       },
       addComment(issueNumber, c) {
         const id = repo.nextCommentId++
+        const timestamp = new Date().toISOString()
         const comment: Comment = {
           id,
-          created_at: new Date().toISOString(),
+          created_at: timestamp,
+          updated_at: timestamp,
           ...c
         }
         const list = repo.comments.get(issueNumber) || []

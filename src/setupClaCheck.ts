@@ -7,30 +7,71 @@ import {
   ClafileContentAndSha,
   CommitterMap,
   Committer,
-  ReactedCommitterMap
+  Signature
 } from './interfaces'
 import {
   createFile,
   getFileContent,
   updateFile
 } from './persistence/persistence'
-import prCommentSetup from './pullrequest/pullRequestComment'
-import { reRunLastWorkFlowIfRequired } from './pullRerunRunner'
+import prCommentSetup, {
+  preparePrComment
+} from './pullrequest/pullRequestComment'
 import { errorMessage, errorStatus } from './shared/errors'
 import { requireOpenerAsAuthor } from './shared/getInputs'
+import {
+  LivePullRequestSnapshot,
+  validateLivePullRequest
+} from './livePullRequest'
+import {
+  MAX_LEDGER_BYTES,
+  MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS,
+  MAX_LEDGER_SIGNATURES
+} from './shared/limits'
+import {
+  listBoundedPullRequestComments,
+  PullRequestComment
+} from './pullrequest/pullRequestComments'
+import { validateSigningCommentsUnchanged } from './pullrequest/signingCommentSnapshot'
 
 export async function setupClaCheck() {
+  // A caller may use this output to authorize a follow-up check refresh. Keep
+  // it false unless this run actually persists a newly accepted signature.
+  core.setOutput('signature_recorded', false)
+  const livePullRequest = await validateLivePullRequest()
+  // Bound all contributor-controlled comments before any ledger or comment
+  // write, then use the same snapshot throughout this action run.
+  const pullRequestComments = await listBoundedPullRequestComments()
   let committerMap = getInitialCommittersMap()
 
-  const commitAuthors = await getCommitters()
-  const openerMismatch = detectOpenerMismatch(commitAuthors)
-  let committers = includePullRequestOpener(commitAuthors)
+  const commitAuthors = await getCommitters(livePullRequest.headSha)
+  const openerMismatch = detectOpenerMismatch(
+    commitAuthors,
+    livePullRequest.opener
+  )
+  let committers = includePullRequestOpener(
+    commitAuthors,
+    livePullRequest.opener
+  )
   committers = checkAllowList(committers)
+  if (openerMismatch) {
+    // The missing-ledger bootstrap path publishes the first bot comment before
+    // this function returns. Carry the guard into that path so its first
+    // diagnostic cannot omit the authenticated opener mismatch.
+    committerMap.openerMismatch = openerMismatch
+  }
 
-  const { claFileContent, sha } = (await getCLAFileContentandSHA(
+  const claFile = await getCLAFileContentandSHA(
     committers,
-    committerMap
-  )) as ClafileContentAndSha
+    committerMap,
+    livePullRequest,
+    pullRequestComments
+  )
+  // A missing ledger was created and no contributor remains after the
+  // authenticated opener allowlist. The bootstrap path already published the
+  // all-signed status, so no ledger update is required.
+  if (!claFile) return
+  const { claFileContent, sha } = claFile
 
   committerMap = prepareCommiterMap(committers, claFileContent) as CommitterMap
   if (openerMismatch) {
@@ -38,73 +79,165 @@ export async function setupClaCheck() {
   }
 
   try {
-    const reactedCommitters = (await prCommentSetup(
+    const commentPlan = await preparePrComment(
       committerMap,
-      committers
-    )) as ReactedCommitterMap
+      committers,
+      pullRequestComments
+    )
+    const reactedCommitters = commentPlan.reactedCommitters
 
     if (reactedCommitters?.newSigned.length) {
       /* pushing the recently signed  contributors to the CLA Json File */
-      await updateFile(sha, claFileContent, reactedCommitters)
+      await validateSigningCommentsUnchanged(
+        pullRequestComments,
+        reactedCommitters.newSigned
+      )
+      await validateLivePullRequest(livePullRequest)
+      await updateFile(sha, claFileContent, reactedCommitters, async () => {
+        await validateSigningCommentsUnchanged(
+          pullRequestComments,
+          reactedCommitters.newSigned
+        )
+        await validateLivePullRequest(livePullRequest)
+      })
+      core.setOutput('signature_recorded', true)
     }
     if (
       reactedCommitters?.allSignedFlag ||
       committerMap?.notSigned === undefined ||
       committerMap.notSigned.length === 0
     ) {
+      // A force-push or retarget can happen while commit identities and PR
+      // comments are read. Revalidate even when no ledger write is needed so
+      // the action cannot report success from a stale snapshot.
+      await validateLivePullRequest(livePullRequest)
+      // Publish an all-signed status only after any new signatures are
+      // revalidated and persisted. A rejected comment leaves the last trusted
+      // bot status unchanged.
+      await commentPlan.apply()
       core.info(`All contributors have signed the CLA 📝 ✅ `)
-      // reRunLastWorkFlowIfRequired is best-effort: its failure should not
-      // fail the CLA check (we already know all contributors signed).
-      try {
-        await reRunLastWorkFlowIfRequired()
-      } catch (err) {
-        core.warning(
-          `Best-effort rerun of prior workflow failed: ${errorMessage(err)}`
-        )
-      }
       if (openerMismatch?.hardFail) {
-        core.setFailed(
-          `Pull Request opener @${openerMismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`
-        )
+        core.setFailed(openerMismatchError(openerMismatch))
         return
       }
       return
     } else {
+      await commentPlan.apply()
       core.setFailed(
         `Committers of Pull Request number ${context.issue.number} have to sign the CLA 📝`
       )
     }
   } catch (err) {
-    core.setFailed(`Could not update the JSON file: ${errorMessage(err)}`)
+    core.setFailed(`Could not complete the CLA check: ${errorMessage(err)}`)
   }
 }
 
 async function getCLAFileContentandSHA(
   committers: Committer[],
-  committerMap: CommitterMap
+  committerMap: CommitterMap,
+  livePullRequest: LivePullRequestSnapshot,
+  pullRequestComments: PullRequestComment[]
 ): Promise<void | ClafileContentAndSha> {
-  let result, claFileContentString, claFileContent, sha
+  let result
   try {
     result = await getFileContent()
   } catch (error) {
     if (errorStatus(error) === 404) {
-      return createClaFileAndPRComment(committers, committerMap)
+      return createClaFileAndPRComment(
+        committers,
+        committerMap,
+        livePullRequest,
+        pullRequestComments
+      )
     } else {
       throw new Error(
         `Could not retrieve repository contents. Status: ${errorStatus(error) ?? 'unknown'}`
       )
     }
   }
-  sha = result?.data?.sha
-  claFileContentString = Buffer.from(result.data.content, 'base64').toString()
-  claFileContent = JSON.parse(claFileContentString)
+  return parseClaFileResponse(result)
+}
+
+function parseClaFileResponse(result: any): ClafileContentAndSha {
+  const sha = result?.data?.sha
+  if (typeof sha !== 'string' || sha.length === 0) {
+    throw new Error('Invalid CLA signature ledger: file SHA is missing')
+  }
+  if (typeof result?.data?.content !== 'string') {
+    throw new Error('Invalid CLA signature ledger: file content is missing')
+  }
+  const claFileContentBuffer = Buffer.from(result.data.content, 'base64')
+  if (claFileContentBuffer.byteLength > MAX_LEDGER_BYTES) {
+    throw new Error(
+      `Invalid CLA signature ledger: file is larger than ${MAX_LEDGER_BYTES} bytes`
+    )
+  }
+  const claFileContent = parseClaFileContent(claFileContentBuffer.toString())
   return { claFileContent, sha }
+}
+
+function parseClaFileContent(raw: string): ClaFileContent {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('Invalid CLA signature ledger: file is not valid JSON')
+  }
+
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    !Array.isArray(
+      (parsed as { signedContributors?: unknown }).signedContributors
+    )
+  ) {
+    throw new Error(
+      'Invalid CLA signature ledger: signedContributors must be an array'
+    )
+  }
+
+  const signatures = (parsed as { signedContributors: unknown[] })
+    .signedContributors
+  if (signatures.length > MAX_LEDGER_SIGNATURES) {
+    throw new Error(
+      `Invalid CLA signature ledger: more than ${MAX_LEDGER_SIGNATURES} signatures`
+    )
+  }
+  const byId = new Map<number, Signature>()
+  for (const value of signatures) {
+    if (!isValidSignature(value)) {
+      throw new Error(
+        'Invalid CLA signature ledger: every entry must have a non-empty name and positive numeric id'
+      )
+    }
+    if (!byId.has(value.id)) byId.set(value.id, value)
+  }
+  if (byId.size !== signatures.length) {
+    core.warning(
+      'Duplicate CLA signature ledger entries were ignored by user ID.'
+    )
+  }
+  return { signedContributors: [...byId.values()] }
+}
+
+function isValidSignature(value: unknown): value is Signature {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as { name?: unknown; id?: unknown }
+  return (
+    typeof candidate.name === 'string' &&
+    candidate.name.trim().length > 0 &&
+    typeof candidate.id === 'number' &&
+    Number.isSafeInteger(candidate.id) &&
+    candidate.id > 0
+  )
 }
 
 async function createClaFileAndPRComment(
   committers: Committer[],
-  committerMap: CommitterMap
-): Promise<void> {
+  committerMap: CommitterMap,
+  livePullRequest: LivePullRequestSnapshot,
+  pullRequestComments: PullRequestComment[]
+): Promise<void | ClafileContentAndSha> {
   committerMap.notSigned = committers
   committerMap.signed = []
   committers.map(committer => {
@@ -118,15 +251,63 @@ async function createClaFileAndPRComment(
   const initialContentBinary =
     Buffer.from(initialContentString).toString('base64')
 
-  await createFile(initialContentBinary).catch((error: unknown) =>
-    core.setFailed(
-      `Error occurred when creating the signed contributors file: ${errorMessage(error)}. Make sure the branch where signatures are stored is NOT protected.`
+  await validateLivePullRequest(livePullRequest)
+  try {
+    await createFile(initialContentBinary)
+  } catch (error) {
+    const recoveredLedger = await recoverConcurrentLedgerCreate(error)
+    if (recoveredLedger) {
+      // The other run won the create race. Continue through the normal
+      // signature path so this run cannot publish all-signed until any new
+      // declaration is validated and persisted in the confirmed ledger.
+      await validateLivePullRequest(livePullRequest)
+      core.warning(
+        'Another Pull Request created the CLA signature ledger concurrently. Continuing with the confirmed ledger.'
+      )
+      return recoveredLedger
+    }
+    throw new Error(
+      `Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`
     )
-  )
-  await prCommentSetup(committerMap, committers)
+  }
+  await validateLivePullRequest(livePullRequest)
+  // The first run creates an empty ledger. Keep existing declarations pending
+  // until a later run can validate and persist them through the normal update
+  // path. Never publish all-signed status for an empty new ledger.
+  await prCommentSetup(committerMap, committers, pullRequestComments, false)
+  if (committers.length === 0) return
+  if (committerMap.openerMismatch?.hardFail) {
+    throw new Error(openerMismatchError(committerMap.openerMismatch))
+  }
   throw new Error(
     `Committers of pull request ${context.issue.number} have to sign the CLA`
   )
+}
+
+async function recoverConcurrentLedgerCreate(
+  createError: unknown
+): Promise<ClafileContentAndSha | undefined> {
+  const status = errorStatus(createError)
+  if (status !== 409 && status !== 422) return undefined
+
+  for (
+    let attempt = 0;
+    attempt < MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS;
+    attempt += 1
+  ) {
+    let result
+    try {
+      result = await getFileContent()
+    } catch (readError) {
+      if (errorStatus(readError) === 404) continue
+      throw new Error(
+        `Could not verify the CLA signature ledger after a concurrent create. Status: ${errorStatus(readError) ?? 'unknown'}`
+      )
+    }
+    return parseClaFileResponse(result)
+  }
+
+  return undefined
 }
 
 function prepareCommiterMap(
@@ -136,11 +317,10 @@ function prepareCommiterMap(
   let committerMap = getInitialCommittersMap()
 
   committerMap.notSigned = committers.filter(
-    committer =>
-      !claFileContent?.signedContributors.some(cla => committer.id === cla.id)
+    committer => !hasReusableStoredSignature(committer, claFileContent)
   )
   committerMap.signed = committers.filter(committer =>
-    claFileContent?.signedContributors.some(cla => committer.id === cla.id)
+    hasReusableStoredSignature(committer, claFileContent)
   )
   committers.map(committer => {
     if (!committer.id) {
@@ -150,11 +330,29 @@ function prepareCommiterMap(
   return committerMap
 }
 
+function hasReusableStoredSignature(
+  committer: Committer,
+  claFileContent: ClaFileContent
+): boolean {
+  if (
+    committer.id <= 0 ||
+    (committer.requiresCurrentSignature && !committer.isPullRequestOpener)
+  )
+    return false
+  return claFileContent.signedContributors.some(cla => committer.id === cla.id)
+}
+
 const getInitialCommittersMap = (): CommitterMap => ({
   signed: [],
   notSigned: [],
   unknown: []
 })
+
+function openerMismatchError(
+  mismatch: NonNullable<CommitterMap['openerMismatch']>
+): string {
+  return `Pull Request opener @${mismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`
+}
 
 /**
  * Prepend the PR opener to the committer set if they are not already present
@@ -162,15 +360,21 @@ const getInitialCommittersMap = (): CommitterMap => ({
  * to the merge in their own right and must sign the CLA, even if every commit
  * was authored by someone else.
  */
-function includePullRequestOpener(committers: Committer[]): Committer[] {
-  const opener = readOpener()
-  if (!opener) return committers
-  if (committers.some(c => c.id === opener.id)) return committers
+function includePullRequestOpener(
+  committers: Committer[],
+  opener: LivePullRequestSnapshot['opener']
+): Committer[] {
+  const existing = committers.find(c => c.id === opener.id)
+  if (existing) {
+    existing.isPullRequestOpener = true
+    return committers
+  }
   return [
     {
       name: opener.login,
       id: opener.id,
-      pullRequestNo: context.issue.number
+      pullRequestNo: context.issue.number,
+      isPullRequestOpener: true
     },
     ...committers
   ]
@@ -178,7 +382,8 @@ function includePullRequestOpener(committers: Committer[]): Committer[] {
 
 /**
  * Return {opener, commitAuthors, hardFail} if the PR opener is NOT recorded
- * as an author or co-author of any commit in the PR. This is an
+ * as an author or co-author of any commit in the PR. Committer metadata does
+ * not qualify because it is not independently authenticated. This is an
  * impersonation-adjacent signal: someone opening a PR whose commits are all
  * attributed to someone else. Undefined when the opener is in the trail or
  * when we cannot read the opener identity from the event payload.
@@ -187,23 +392,19 @@ function includePullRequestOpener(committers: Committer[]): Committer[] {
  * decide whether to call setFailed vs just render a warning.
  */
 function detectOpenerMismatch(
-  commitAuthors: Committer[]
+  commitAuthors: Committer[],
+  opener: LivePullRequestSnapshot['opener']
 ): { opener: string; commitAuthors: string[]; hardFail: boolean } | undefined {
-  const opener = readOpener()
-  if (!opener) return undefined
-  if (commitAuthors.some(c => c.id === opener.id)) return undefined
+  const authorshipIdentities = commitAuthors.filter(
+    committer => committer.isPrimaryAuthor || committer.isCoAuthor
+  )
+  if (authorshipIdentities.some(c => c.id === opener.id)) return undefined
   core.setOutput('opener_not_in_commits', true)
   return {
     opener: opener.login,
-    commitAuthors: commitAuthors.map(c => c.name).filter(n => n.length > 0),
+    commitAuthors: authorshipIdentities
+      .map(c => c.name)
+      .filter(n => n.length > 0),
     hardFail: requireOpenerAsAuthor()
   }
-}
-
-function readOpener(): { id: number; login: string } | undefined {
-  const opener = context.payload.pull_request?.user as
-    | { id?: number; login?: string }
-    | undefined
-  if (!opener?.id || !opener.login) return undefined
-  return { id: opener.id, login: opener.login }
 }

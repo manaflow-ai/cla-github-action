@@ -11,7 +11,105 @@ commit that introduced it.
 
 ## Unreleased
 
-_Nothing yet._
+### Security
+
+- The action now rejects an empty, relative, or non-HTTPS
+  `path-to-document` input before it makes a GitHub write.
+- Commit identities now come from GitHub's GraphQL `Commit.authors`
+  connection. The action includes the primary author, resolved co-authors, and
+  every committer. Unlinked service-looking metadata is not exempt because git
+  names and email addresses can be forged. The action no longer trusts a
+  numeric ID written in a raw `Co-authored-by` trailer.
+- Every non-opener identity derived from git author, co-author, or committer
+  metadata must post the exact declaration on the current Pull Request.
+  GitHub's email-to-account mapping does not authenticate authorship. A stored
+  signature is reusable only for the account authenticated by the live Pull
+  Request API as the opener.
+- The deprecated name, email, and glob `allowlist` is ignored. The new
+  `allowlist-ids` input can exempt only the authenticated live Pull Request
+  opener. It never exempts an identity derived only from commit metadata.
+- Signature comments must contain only the exact declaration. Appended text,
+  changed case or punctuation, quotations, and bot comments do not count.
+- A declaration comment counts only when its GitHub creation and update
+  timestamps match. Editing an older comment into the declaration before a
+  later `recheck` cannot create a signature.
+- Existing CLA marker comments are trusted only when GitHub confirms that the
+  canonical Actions bot wrote them. A spoofed marker cannot suppress a valid
+  signing comment from the same action run. The verified numeric bot ID comes
+  from the current GitHub instance, so GitHub Enterprise Server is supported.
+- The action checks the live Pull Request state, opener, base repository ID,
+  base branch, head repository ID, head branch, and head commit before
+  signature work, before a ledger write, and before it reports success.
+- GraphQL commit identity pages must report the same Pull Request head commit
+  as the live REST snapshot. A force-push cannot substitute an unbound commit
+  set between validation and signature work.
+- The signature ledger now rejects invalid entries and removes duplicate IDs.
+- The unsafe branch-based internal workflow rerun was removed. A repository
+  must use a separate trusted rerun job that validates the Pull Request number
+  and current head commit.
+- Repository workflows now use full commit SHAs for every external action,
+  explicit minimum token permissions, disabled checkout credential
+  persistence, and job timeouts. CODEOWNERS and weekly Dependabot updates
+  cover the action, npm dependencies, and workflow dependencies.
+- Pull Requests with more than 1,000 commits or more than 101,000 git identity
+  assertions fail closed to bound work on untrusted GraphQL data. The identity
+  bound is derived from the maximum 100 authors per commit plus one committer.
+- The action no longer unlocks a reopened Pull Request. It preserves
+  maintainer locks and tells maintainers to unlock the conversation manually.
+- A failed request to lock a merged Pull Request now fails the action instead
+  of reporting success with an unlocked signature comment.
+- Pull Requests with more than 1,000 comments and signature ledgers with more
+  than 10,000 entries or 1,000,000 bytes fail closed before a read or write.
+- A closed event is re-fetched and matched by immutable base repository ID,
+  base branch, opener, state, and merge result before the action locks the
+  conversation. A valid live head is still required, but a source branch
+  advance or repository deletion after merge does not prevent locking.
+- The new `required-base-ref` input defaults to `main`, so an omitted input
+  cannot authorize writes or locks for another base branch. Repositories with
+  another contribution branch must set it explicitly.
+- GitHub API failures fail the current run without automatic request replay.
+  This prevents an ambiguous lost response from creating duplicate comments
+  or ledger writes. Operators can rerun the failed workflow after recovery.
+- The action bounds and snapshots Pull Request comments before any ledger or
+  comment write. Only a GitHub `User` actor with a positive account ID can
+  create a signature.
+- Merged Pull Request locks use GitHub's valid `resolved` reason.
+- Git names and emails are rendered as escaped, inert text in bot comments.
+  Attacker-controlled commit metadata cannot inject Markdown blocks, links,
+  or account mentions.
+- Accepted signing comments are re-fetched from the bounded Pull Request
+  comment list immediately before a ledger write. An edited, deleted, or
+  identity-changed comment fails the run without changing the ledger.
+- The authenticated bot marker is re-fetched immediately before each comment
+  create or update. A stale plan fails closed when the marker's presence, ID,
+  identity, body, or timestamps changed. GitHub has no atomic compare-and-swap
+  for a comment and the ledger, so a short GET-to-write race remains.
+- The trusted bot publishes an all-signed status only after the action
+  revalidates the signing comments and persists new signatures. A rejected
+  signing comment leaves the prior bot status unchanged.
+- When the signature ledger does not exist, the first run creates an empty
+  ledger and leaves existing declarations pending with `recheck` guidance. It
+  never publishes all-signed status before those signatures are persisted.
+- The first missing-ledger comment now includes the opener-authorship guard and
+  its specific failure message, instead of hiding that diagnostic until a
+  later run.
+- If an authenticated allowlisted opener is the only contributor on the first
+  Pull Request, ledger creation completes successfully without requesting a
+  signature.
+- When two Pull Requests create the first ledger together, a 409 or 422 create
+  response starts at most three safe reads. The action continues only after it
+  confirms a valid ledger. Other create failures still fail closed.
+- The shared ledger uses bounded optimistic locking for later cross-Pull Request
+  writes. A contents conflict re-reads the ledger, merges the new signature,
+  revalidates the live Pull Request and signing comment, and retries at most
+  three writes. Persistent contention fails closed and may require a later
+  `recheck`; it cannot cause an unbounded runner loop or discard a committed
+  signature.
+
+### Changed
+
+- Updated the production Actions toolkit to `@actions/core` 3.0.1 and
+  `@actions/github` 9.1.1. Updated the action bundle to the Node 24 runtime.
 
 ## v3.2.0 — 2026-06-17
 

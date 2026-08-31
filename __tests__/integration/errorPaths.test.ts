@@ -1,12 +1,6 @@
 /**
  * Failure-mode scenarios: how does the action behave when GitHub returns a
  * transient 5xx, a 403, or when createFile fails?
- *
- * The Octokit clients have @octokit/plugin-retry installed, which retries 5xx
- * and network errors with exponential backoff (3 attempts, ~1s/4s/9s delays).
- * These tests inject PERMANENT failures (high times:N) to lock in the
- * behaviour after retries are exhausted, and use longer per-test timeouts to
- * accommodate the retry delays.
  */
 import * as core from '@actions/core'
 import { installFakeGitHub, FakeGitHub } from '../testHelpers/fakeGithub'
@@ -40,7 +34,6 @@ function watchCore() {
 }
 
 describe('error paths', () => {
-  // Retries add up to ~14s of backoff before the action gives up.
   jest.setTimeout(30000)
 
   let fake: FakeGitHub
@@ -54,7 +47,7 @@ describe('error paths', () => {
     resetEnv()
   })
 
-  it('absorbs a one-shot 5xx via the retry plugin and proceeds normally', async () => {
+  it('fails closed without replaying a one-shot GitHub 5xx response', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
@@ -64,8 +57,7 @@ describe('error paths', () => {
     fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
       signedContributors: []
     })
-    // First GET returns the GitHub "Unicorn!" HTML 500 page; the plugin
-    // retries and the second attempt succeeds.
+    // The first GET returns the GitHub "Unicorn!" HTML 500 page.
     fake.injectFailure({
       method: 'GET',
       pathPattern: /\/repos\/acme\/widgets\/contents\/signatures/,
@@ -89,14 +81,10 @@ describe('error paths', () => {
 
     await runAction()
 
-    // The action should reach its normal not-yet-signed failure path, NOT
-    // bail with the retrieve-contents error.
-    expect(watch.failures.join('\n')).not.toMatch(
+    expect(watch.failures.join('\n')).toMatch(
       /Could not retrieve repository contents/
     )
-    expect(watch.failures.join('\n')).toMatch(
-      /Committers of Pull Request number 7 have to sign the CLA/
-    )
+    expect(fake.repo('acme', 'widgets').listComments(7)).toHaveLength(0)
     watch.restore()
   })
 
@@ -110,7 +98,7 @@ describe('error paths', () => {
     fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
       signedContributors: []
     })
-    // Inject enough 502s that any transparent retry will exhaust them all.
+    // Inject repeated 502 responses.
     fake.injectFailure({
       method: 'GET',
       pathPattern: /\/repos\/acme\/widgets\/contents\/signatures/,
@@ -133,10 +121,9 @@ describe('error paths', () => {
 
     await runAction()
 
-    // The action reports the failure through core.setFailed. It does not
-    // silently retry (v6 @actions/github does not ship plugin-retry).
+    // The action reports the failure through core.setFailed.
     expect(watch.failures.join('\n')).toMatch(
-      /Could not retrieve repository contents|Could not update the JSON file/
+      /Could not retrieve repository contents|Could not complete the CLA check/
     )
     watch.restore()
   })
@@ -180,7 +167,7 @@ describe('error paths', () => {
     watch.restore()
   })
 
-  it('swallows a rerun-workflow failure as a warning rather than failing the whole action', async () => {
+  it('does not call the Actions rerun API after a comment signature', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
@@ -192,17 +179,18 @@ describe('error paths', () => {
     })
     fake.repo('acme', 'widgets').addComment(7, {
       body: '**CLA Assistant Lite bot**: notice',
-      user: { login: 'github-actions[bot]', id: 41898282 }
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
     })
     fake.repo('acme', 'widgets').addComment(7, {
-      body: 'i have read the cla document and i hereby sign the cla',
-      user: { login: 'alice', id: 1001 }
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
     })
     fake
       .repo('acme', 'widgets')
       .addWorkflow('cla-check', [{ id: 777, conclusion: 'failure' }])
 
-    // Rerun-workflow-run fails at the 'listWorkflowRuns' step.
+    // Any attempt to inspect a workflow run fails. The hardened action must
+    // not touch this endpoint because reruns belong in a separate trusted job.
     fake.injectFailure({
       method: 'GET',
       pathPattern: /\/repos\/acme\/widgets\/actions\/workflows\/\d+\/runs/,
@@ -221,7 +209,7 @@ describe('error paths', () => {
         issue: { number: 7, pull_request: {} },
         comment: {
           body: 'I have read the CLA Document and I hereby sign the CLA',
-          user: { login: 'alice', id: 1001 }
+          user: { login: 'alice', id: 1001, type: 'User' }
         },
         repository: { id: fake.repo('acme', 'widgets').state.id }
       }
@@ -238,9 +226,116 @@ describe('error paths', () => {
     }
     expect(sigFile.signedContributors.map(c => c.name)).toContain('alice')
 
-    // The rerun failure should be logged as a warning, not a hard failure.
-    expect(watch.warnings.join('\n')).toMatch(/rerun of prior workflow failed/i)
+    expect(fake.recordedRerunRequests).toEqual([])
+    expect(watch.warnings.join('\n')).not.toMatch(/rerun/i)
     expect(watch.failures).toEqual([])
+    watch.restore()
+  })
+
+  it('fails closed with a clear error when the signature ledger shape is invalid', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 22,
+      head: { sha: 'headsha', ref: 'feature/invalid-ledger' },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
+      signedContributors: 'everyone'
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 22,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 22,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/invalid cla signature ledger/i)
+    expect(fake.repo('acme', 'widgets').listComments(22)).toHaveLength(0)
+    watch.restore()
+  })
+
+  it('fails closed when the signature ledger has more than 10000 entries', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 35,
+      head: { sha: 'headsha', ref: 'feature/oversized-ledger' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
+      signedContributors: Array.from({ length: 10_001 }, (_, index) => ({
+        name: `signer-${index}`,
+        id: 500_000 + index
+      }))
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 35,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 35,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/more than 10000 signatures/i)
+    expect(fake.repo('acme', 'widgets').listComments(35)).toHaveLength(0)
+    watch.restore()
+  })
+
+  it('fails closed when the signature ledger is larger than 1000000 bytes', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 37,
+      head: { sha: 'headsha', ref: 'feature/large-ledger' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
+      signedContributors: [{ name: 'x'.repeat(1_000_001), id: 9999 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 37,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 37,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/larger than 1000000 bytes/i)
+    expect(fake.repo('acme', 'widgets').listComments(37)).toHaveLength(0)
     watch.restore()
   })
 })

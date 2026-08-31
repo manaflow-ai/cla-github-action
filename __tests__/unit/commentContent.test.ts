@@ -1,3 +1,4 @@
+import { context } from '@actions/github'
 import { resetEnv, setDefaultInputs, setInput } from '../testHelpers/env'
 import { commentContent } from '../../src/pullrequest/pullRequestCommentContent'
 import { CommitterMap } from '../../src/interfaces'
@@ -39,7 +40,36 @@ describe('commentContent (CLA mode)', () => {
     expect(body).toContain('1** out of **2** committers have signed')
     expect(body).toContain(':white_check_mark:')
     expect(body).toContain('alice')
-    expect(body).toContain(':x: @bob')
+    expect(body).toContain(':x: [bob](https://github.com/bob)')
+  })
+
+  it('keeps mapped commit identities inert unless they are the authenticated opener', () => {
+    const body = commentContent(
+      false,
+      committerMap({
+        notSigned: [
+          {
+            name: 'mapped-account',
+            id: 1234,
+            pullRequestNo: 7,
+            requiresCurrentSignature: true,
+            isPrimaryAuthor: true
+          },
+          {
+            name: 'opener-account',
+            id: 5678,
+            pullRequestNo: 7,
+            isPullRequestOpener: true
+          }
+        ]
+      })
+    )
+
+    expect(body).toContain(
+      ':x: [mapped-account](https://github.com/mapped-account)'
+    )
+    expect(body).not.toContain('@mapped-account')
+    expect(body).toContain(':x: @opener-account')
   })
 
   it('uses singular "you" language when only one committer', () => {
@@ -116,10 +146,63 @@ describe('commentContent (CLA mode)', () => {
       // No email markdown / no backticks around missing email.
       expect(body).not.toMatch(/`<\s*>`/)
     })
+
+    it('renders untrusted git names and emails as inert text', () => {
+      const body = commentContent(
+        false,
+        committerMap({
+          notSigned: [
+            { name: 'safe-user', id: 2, pullRequestNo: 7 },
+            {
+              name: 'Mallory\n> [!CAUTION]\n<script>alert(1)</script>',
+              id: 0,
+              pullRequestNo: 7,
+              email: 'evil` [click](https://evil.test)'
+            }
+          ],
+          unknown: [
+            {
+              name: 'Mallory\n> [!CAUTION]\n<script>alert(1)</script>',
+              id: 0,
+              pullRequestNo: 7,
+              email: 'evil` [click](https://evil.test)'
+            }
+          ]
+        })
+      )
+      expect(body).toContain(
+        '<code>Mallory &gt; [!CAUTION] &lt;script&gt;alert(1)&lt;/script&gt;</code>'
+      )
+      expect(body).toContain(
+        '<code>&lt;evil` [click](https://evil.test)&gt;</code>'
+      )
+      expect(body).not.toContain('<script>alert(1)</script>')
+      expect(body).not.toContain(':x: @Mallory')
+    })
+
+    it('removes invisible Unicode formatting controls from inert identities', () => {
+      const body = commentContent(
+        false,
+        committerMap({
+          unknown: [
+            {
+              name: 'Mallory\u202e\u200balert',
+              id: 0,
+              pullRequestNo: 7,
+              email: 'evil@example.com'
+            }
+          ]
+        })
+      )
+
+      expect(body).toContain('<code>Mallory alert</code>')
+      expect(body).not.toContain('\u202e')
+      expect(body).not.toContain('\u200b')
+    })
   })
 
   describe('opener-mismatch block', () => {
-    it('renders a CAUTION block naming opener + commit authors when hardFail is true', () => {
+    it('renders a CAUTION block naming opener + author identities when hardFail is true', () => {
       const body = commentContent(
         true,
         committerMap({
@@ -132,8 +215,9 @@ describe('commentContent (CLA mode)', () => {
       )
       expect(body).toContain('[!CAUTION]')
       expect(body).toContain('@alice')
-      expect(body).toContain('@bob')
-      expect(body).toContain('@carol')
+      expect(body).toContain('<code>bob</code>')
+      expect(body).toContain('<code>carol</code>')
+      expect(body).toContain('Author/co-author identities')
       expect(body).toContain('require-opener-as-author')
     })
 
@@ -151,10 +235,10 @@ describe('commentContent (CLA mode)', () => {
       expect(body).toContain('[!NOTE]')
       expect(body).not.toContain('[!CAUTION]')
       expect(body).toContain('@alice')
-      expect(body).toContain('@bob')
+      expect(body).toContain('<code>bob</code>')
     })
 
-    it('handles an empty commit-author list gracefully', () => {
+    it('handles an empty author identity list gracefully', () => {
       const body = commentContent(
         true,
         committerMap({
@@ -166,7 +250,27 @@ describe('commentContent (CLA mode)', () => {
         })
       )
       expect(body).toContain('[!CAUTION]')
-      expect(body).toContain('no commit authors could be identified')
+      expect(body).toContain(
+        'no author or co-author identities could be identified'
+      )
+    })
+
+    it('renders opener and author metadata without Markdown injection', () => {
+      const body = commentContent(
+        true,
+        committerMap({
+          openerMismatch: {
+            opener: 'alice\n@maintainer',
+            commitAuthors: ['bob\n> [!WARNING]', '[click](https://evil.test)'],
+            hardFail: true
+          }
+        })
+      )
+      expect(body).toContain('<code>alice @maintainer</code>')
+      expect(body).toContain('<code>bob &gt; [!WARNING]</code>')
+      expect(body).toContain('<code>[click](https://evil.test)</code>')
+      expect(body).not.toContain('Opener: @alice')
+      expect(body).not.toContain('\n> > [!WARNING]')
     })
   })
 
@@ -174,6 +278,45 @@ describe('commentContent (CLA mode)', () => {
     setInput('suggest-recheck', 'true')
     const body = commentContent(false, committerMap())
     expect(body).toContain('retrigger this bot by commenting **recheck**')
+  })
+})
+
+describe('commentContent identity profile links', () => {
+  const originalServerUrl = context.serverUrl
+
+  beforeEach(() => setDefaultInputs())
+  afterEach(() => {
+    resetEnv()
+    context.serverUrl = originalServerUrl
+  })
+
+  it('uses the active GitHub Enterprise server host for mapped identities', () => {
+    context.serverUrl = 'https://github.enterprise.example'
+
+    const body = commentContent(
+      false,
+      committerMap({
+        signed: [{ name: 'alice', id: 1, pullRequestNo: 7 }],
+        notSigned: [{ name: 'bob', id: 2, pullRequestNo: 7 }]
+      })
+    )
+
+    expect(body).toContain(':x: [bob](https://github.enterprise.example/bob)')
+    expect(body).not.toContain('https://github.com/bob')
+  })
+
+  it('uses the active public GitHub host for mapped identities', () => {
+    context.serverUrl = 'https://github.com'
+
+    const body = commentContent(
+      false,
+      committerMap({
+        signed: [{ name: 'alice', id: 1, pullRequestNo: 7 }],
+        notSigned: [{ name: 'bob', id: 2, pullRequestNo: 7 }]
+      })
+    )
+
+    expect(body).toContain(':x: [bob](https://github.com/bob)')
   })
 })
 

@@ -2,32 +2,39 @@ import * as core from '@actions/core'
 import * as github from '@actions/github'
 import { context } from '@actions/github'
 import { setupClaCheck } from '../src/setupClaCheck'
-import {
-  lockPullRequest,
-  unlockPullRequest
-} from '../src/pullrequest/pullRequestLock'
+import { lockPullRequest } from '../src/pullrequest/pullRequestLock'
 import { run } from '../src/main'
+import { validateMergedPullRequestForLock } from '../src/livePullRequest'
 
 jest.mock('@actions/core')
 jest.mock('@actions/github')
 jest.mock('../src/pullrequest/pullRequestLock')
 jest.mock('../src/setupClaCheck')
+jest.mock('../src/livePullRequest')
 const mockedGetClas = jest.mocked(setupClaCheck)
 const mockedLockPullRequest = jest.mocked(lockPullRequest)
-const mockedUnlockPullRequest = jest.mocked(unlockPullRequest)
 const mockedCoreGetInput = jest.mocked(core.getInput)
+const mockedCoreWarning = jest.mocked(core.warning)
+const mockedValidateMergedPullRequestForLock = jest.mocked(
+  validateMergedPullRequestForLock
+)
 
 describe('Pull request event', () => {
   beforeEach(async () => {
     mockedGetClas.mockReset()
     mockedLockPullRequest.mockReset()
-    mockedUnlockPullRequest.mockReset()
-    mockedCoreGetInput.mockImplementation((name: string) =>
-      name === 'lock-pullrequest-aftermerge' ? 'true' : ''
-    )
+    mockedCoreWarning.mockReset()
+    mockedValidateMergedPullRequestForLock.mockReset()
+    mockedValidateMergedPullRequestForLock.mockResolvedValue()
+    mockedCoreGetInput.mockImplementation((name: string) => {
+      if (name === 'lock-pullrequest-aftermerge') return 'true'
+      if (name === 'required-base-ref') return 'main'
+      if (name === 'path-to-document') return 'https://example.com/cla'
+      return ''
+    })
     // @ts-ignore
     github.context = {
-      eventName: 'pull_request',
+      eventName: 'pull_request_target',
       ref: 'refs/pull/232/merge',
       workflow: 'CLA Assistant',
       action: 'ibakshaygithub-action-1',
@@ -66,7 +73,27 @@ describe('Pull request event', () => {
 
   test('the lockPullRequest  method should be called if there is a pull request merge/closed', async () => {
     await run()
+    expect(mockedValidateMergedPullRequestForLock).toHaveBeenCalled()
     expect(mockedLockPullRequest).toHaveBeenCalled()
+  })
+
+  test('a failed lock request is reported through the action failure channel', async () => {
+    mockedLockPullRequest.mockRejectedValueOnce(
+      new Error('lock request failed')
+    )
+
+    await run()
+
+    expect(core.setFailed).toHaveBeenCalledWith('lock request failed')
+  })
+
+  test('a failed merged Pull Request validation prevents locking', async () => {
+    mockedValidateMergedPullRequestForLock.mockRejectedValueOnce(
+      new Error('live identity mismatch')
+    )
+    await run()
+    expect(mockedLockPullRequest).not.toHaveBeenCalled()
+    expect(core.setFailed).toHaveBeenCalledWith('live identity mismatch')
   })
 
   test('the checkcla  method should not called if there is a pull request merge/closed', async () => {
@@ -81,35 +108,50 @@ describe('Pull request event', () => {
     expect(mockedGetClas).not.toHaveBeenCalled()
   })
 
-  test('the unlockPullRequest method should be called if a locked pull request is reopened', async () => {
+  test('a reopened pull request keeps its maintainer lock', async () => {
     github.context.payload.action = 'reopened'
     github.context.payload.pull_request!.locked = true
     await run()
-    expect(mockedUnlockPullRequest).toHaveBeenCalled()
+    expect(mockedCoreWarning).toHaveBeenCalledWith(
+      expect.stringMatching(/preserves maintainer locks/i)
+    )
     expect(mockedGetClas).toHaveBeenCalled()
   })
 
-  test('the unlockPullRequest method should not be called if an unlocked pull request is reopened', async () => {
+  test('an unlocked pull request can run the check after reopen', async () => {
     github.context.payload.action = 'reopened'
     await run()
-    expect(mockedUnlockPullRequest).not.toHaveBeenCalled()
+    expect(mockedCoreWarning).not.toHaveBeenCalled()
     expect(mockedGetClas).toHaveBeenCalled()
   })
 
-  test('the unlockPullRequest method should not be called if lock-pullrequest-aftermerge is disabled', async () => {
-    mockedCoreGetInput.mockImplementation(() => 'false')
+  test('a maintainer lock is preserved when automatic locking is disabled', async () => {
+    mockedCoreGetInput.mockImplementation((name: string) => {
+      if (name === 'lock-pullrequest-aftermerge') return 'false'
+      if (name === 'required-base-ref') return 'main'
+      if (name === 'path-to-document') return 'https://example.com/cla'
+      return ''
+    })
     github.context.payload.action = 'reopened'
     github.context.payload.pull_request!.locked = true
     await run()
-    expect(mockedUnlockPullRequest).not.toHaveBeenCalled()
+    expect(mockedCoreWarning).toHaveBeenCalledWith(
+      expect.stringMatching(/preserves maintainer locks/i)
+    )
     expect(mockedGetClas).toHaveBeenCalled()
   })
 
-  test('the checkcla method should be called on a merged/closed pull request if lock-pullrequest-aftermerge is disabled', async () => {
-    mockedCoreGetInput.mockImplementation(() => 'false')
+  test('a closed event does no CLA work when automatic locking is disabled', async () => {
+    mockedCoreGetInput.mockImplementation((name: string) => {
+      if (name === 'lock-pullrequest-aftermerge') return 'false'
+      if (name === 'required-base-ref') return 'main'
+      if (name === 'path-to-document') return 'https://example.com/cla'
+      return ''
+    })
     await run()
     expect(mockedLockPullRequest).not.toHaveBeenCalled()
-    expect(mockedGetClas).toHaveBeenCalled()
+    expect(mockedValidateMergedPullRequestForLock).not.toHaveBeenCalled()
+    expect(mockedGetClas).not.toHaveBeenCalled()
   })
 
   test('an issue_comment event without a pull_request payload runs the CLA check without locking or unlocking', async () => {
@@ -118,7 +160,6 @@ describe('Pull request event', () => {
     delete github.context.payload.pull_request
     await run()
     expect(mockedLockPullRequest).not.toHaveBeenCalled()
-    expect(mockedUnlockPullRequest).not.toHaveBeenCalled()
     expect(mockedGetClas).toHaveBeenCalled()
   })
 
@@ -134,6 +175,40 @@ describe('Pull request event', () => {
     await run()
     expect(mockedGetClas).toHaveBeenCalled()
   })
+
+  test('uses the secure base-branch default without a warning', async () => {
+    mockedCoreGetInput.mockImplementation((name: string) => {
+      if (name === 'lock-pullrequest-aftermerge') return 'true'
+      if (name === 'path-to-document') return 'https://example.com/cla'
+      return ''
+    })
+    github.context.payload.action = 'opened'
+    await run()
+    expect(mockedCoreWarning).not.toHaveBeenCalled()
+    expect(mockedGetClas).toHaveBeenCalled()
+  })
+
+  test.each(['', 'CLA.md', 'http://example.com/cla', '//example.com/cla'])(
+    'rejects an unsafe path-to-document before any GitHub write: %p',
+    async documentUrl => {
+      mockedCoreGetInput.mockImplementation((name: string) => {
+        if (name === 'lock-pullrequest-aftermerge') return 'true'
+        if (name === 'required-base-ref') return 'main'
+        if (name === 'path-to-document') return documentUrl
+        return ''
+      })
+      github.context.payload.action = 'opened'
+
+      await run()
+
+      expect(core.setFailed).toHaveBeenCalledWith(
+        expect.stringMatching(/path-to-document.*non-empty absolute HTTPS URL/i)
+      )
+      expect(mockedGetClas).not.toHaveBeenCalled()
+      expect(mockedValidateMergedPullRequestForLock).not.toHaveBeenCalled()
+      expect(mockedLockPullRequest).not.toHaveBeenCalled()
+    }
+  )
 
   test('the lockPullRequest  method should not be called if there is a pull request sync', async () => {
     github.context.payload.action = 'synchronize'

@@ -1,6 +1,5 @@
 import { getOctokit } from '@actions/github'
 import * as core from '@actions/core'
-import { retry } from '@octokit/plugin-retry'
 
 /** The Octokit instance type returned by @actions/github's getOctokit. */
 export type Octokit = ReturnType<typeof getOctokit>
@@ -14,11 +13,8 @@ function readEnvToken(name: string): string {
   return v
 }
 
-// GitHub's API has periodic transient outages (HTTP 5xx, often the
-// "Unicorn!" HTML page). The retry plugin retries 5xx and network errors
-// with exponential backoff so a single bad request doesn't fail the run.
 function buildOctokit(token: string): Octokit {
-  return getOctokit(token, {}, retry)
+  return getOctokit(token)
 }
 
 export function getDefaultOctokitClient(): Octokit {

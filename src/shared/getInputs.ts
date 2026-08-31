@@ -17,8 +17,14 @@ export const getPathToDocument = (): string =>
 export const getBranch = (): string =>
   core.getInput('branch', { required: false })
 
+export const getRequiredBaseRef = (): string =>
+  core.getInput('required-base-ref', { required: false }) || 'main'
+
 export const getAllowListItem = (): string =>
   core.getInput('allowlist', { required: false })
+
+export const getAllowListIds = (): string =>
+  core.getInput('allowlist-ids', { required: false })
 
 export const getSignedCommitMessage = (): string =>
   core.getInput('signed-commit-message', { required: false })
@@ -44,7 +50,8 @@ export const suggestRecheck = (): boolean => getBooleanInput('suggest-recheck')
 
 /**
  * Whether the PR opener must be recorded as an author or co-author of at
- * least one commit in the PR. When true (the default), an opener who is not
+ * least one commit in the PR. Committer metadata does not qualify because it
+ * is not authenticated. When true (the default), an opener who is not
  * in the authorship trail causes the check to fail — a guard against
  * impersonation of an attacker-submitted patch attributed to a trusted
  * identity. Opt out by setting 'false' if your workflow involves submitters

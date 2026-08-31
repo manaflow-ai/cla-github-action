@@ -3,127 +3,142 @@ import {
   commentContainsSignature,
   isCommentSignedByUser
 } from '../../src/pullrequest/signatureComment'
+import signatureWithPRComment from '../../src/pullrequest/signatureComment'
+import { setContext } from '../testHelpers/context'
 
 const CLA = 'I have read the CLA Document and I hereby sign the CLA'
 const DCO = 'I have read the DCO Document and I hereby sign the DCO'
 
 describe('commentContainsSignature', () => {
-  describe('accepts', () => {
-    it.each([
-      ['exact phrase', CLA],
-      ['surrounding whitespace', `\n  ${CLA}  \n`],
-      ['lower case', CLA.toLowerCase()],
-      [
-        'extra internal whitespace',
-        'I have read the  CLA  Document and I  hereby sign the CLA'
-      ],
-      ['trailing period', `${CLA}.`],
-      ['trailing exclamation', `${CLA}!`],
-      ['trailing period then recheck on a new line', `${CLA}.\n\nrecheck`],
-      ['recheck on a new line', `${CLA}\nrecheck`],
-      ['CRLF line endings', `${CLA}\r\nrecheck\r\n`],
-      ['short greeting on its own line', `Hi,\n\n${CLA}`]
-    ])('%s', (_, body) => {
-      expect(commentContainsSignature(body, CLA)).toBe(true)
-    })
+  it.each([['exact phrase', CLA]])('accepts %s', (_, body) => {
+    expect(commentContainsSignature(body, CLA)).toBe(true)
   })
 
-  describe('rejects', () => {
-    it.each([
-      ['empty body', ''],
-      ['unrelated text', 'recheck'],
-      ['phrase embedded mid-line', `Sure, ${CLA} — happy to help`],
-      ['negated on the same line', `I have NOT ${CLA}`],
-      ['phrase inside a markdown blockquote', `> ${CLA}`],
-      [
-        'extra text longer than the phrase',
-        `${CLA}\n\n` +
-          'And here is a paragraph of extra commentary that is clearly longer ' +
-          'than the declaration itself and so should not be treated as a signature.'
-      ],
-      ['near-miss wording', 'I have read the CLA and I sign it']
-    ])('%s', (_, body) => {
-      expect(commentContainsSignature(body, CLA)).toBe(false)
-    })
-
-    it('rejects when the configured phrase is empty', () => {
-      expect(commentContainsSignature('anything', '   ')).toBe(false)
-    })
+  it.each([
+    ['empty body', ''],
+    ['unrelated text', 'recheck'],
+    ['leading spaces', `  ${CLA}`],
+    ['trailing spaces', `${CLA}  `],
+    ['surrounding blank lines', `\n\n${CLA}\n\n`],
+    ['CRLF around the phrase', `\r\n${CLA}\r\n`],
+    ['lower-case wording', CLA.toLowerCase()],
+    [
+      'changed whitespace inside the phrase',
+      CLA.replace('CLA Document', 'CLA  Document')
+    ],
+    ['trailing period', `${CLA}.`],
+    ['trailing exclamation', `${CLA}!`],
+    ['appended recheck', `${CLA}\nrecheck`],
+    ['prepended greeting', `Hi,\n\n${CLA}`],
+    ['appended qualification', `${CLA}\nfor this change only`],
+    ['edited after signing', `${CLA}\nI withdraw this declaration`],
+    ['phrase inside a markdown blockquote', `> ${CLA}`],
+    ['phrase after a markdown blockquote', `> context\n${CLA}`],
+    ['near-miss wording', 'I have read the CLA and I sign it']
+  ])('rejects %s', (_, body) => {
+    expect(commentContainsSignature(body, CLA)).toBe(false)
   })
 
-  describe('extra-text allowance', () => {
-    it('accepts extra text up to the phrase length', () => {
-      const extra = 'x'.repeat(CLA.length - 1)
-      expect(commentContainsSignature(`${CLA}\n${extra}`, CLA)).toBe(true)
-    })
-
-    it('rejects extra text just beyond the phrase length', () => {
-      const extra = 'x'.repeat(CLA.length)
-      expect(commentContainsSignature(`${CLA}\n${extra}`, CLA)).toBe(false)
-    })
-
-    it('still tolerates a short remark when the custom phrase is very short', () => {
-      expect(commentContainsSignature('I agree\n\nrecheck', 'I agree')).toBe(
-        true
-      )
-    })
+  it('requires an exact custom phrase as the whole body', () => {
+    const phrase = 'I accept the Contributor Terms'
+    expect(commentContainsSignature(phrase, phrase)).toBe(true)
+    expect(commentContainsSignature(`${phrase}.`, phrase)).toBe(false)
+    expect(commentContainsSignature(`${phrase}\nrecheck`, phrase)).toBe(false)
   })
 
-  describe('custom phrase', () => {
-    it('applies the same own-line rule', () => {
-      const phrase = 'I agree to the Developer Certificate of Origin'
-      expect(commentContainsSignature(`${phrase}.\n\nrecheck`, phrase)).toBe(
-        true
+  it('requires every line of a multi-line custom phrase exactly', () => {
+    const phrase = 'I have read the Contributor Terms\nI sign the CLA'
+    expect(commentContainsSignature(phrase, phrase)).toBe(true)
+    expect(commentContainsSignature(`${phrase}\nrecheck`, phrase)).toBe(false)
+    expect(
+      commentContainsSignature(
+        'I have read the Contributor Terms\n> I sign the CLA',
+        phrase
       )
-      expect(commentContainsSignature(`well ${phrase} ok`, phrase)).toBe(false)
-    })
-
-    it('matches when the configured phrase itself ends in a period', () => {
-      expect(commentContainsSignature('I agree.', 'I agree.')).toBe(true)
-      expect(commentContainsSignature('I agree', 'I agree.')).toBe(true)
-    })
-
-    it('matches a multi-line custom phrase as a contiguous block', () => {
-      const phrase = 'I have read the Contributor Terms.\nI sign the CLA.'
-      expect(commentContainsSignature(phrase, phrase)).toBe(true)
-      expect(commentContainsSignature(`${phrase}\n\nrecheck`, phrase)).toBe(
-        true
-      )
-      expect(
-        commentContainsSignature('I have read the Contributor Terms.', phrase)
-      ).toBe(false)
-    })
-
-    it('does not let a multi-line phrase span a blockquote line', () => {
-      const phrase = 'Line one\nLine two'
-      expect(
-        commentContainsSignature('Line one\n> something\nLine two', phrase)
-      ).toBe(false)
-    })
+    ).toBe(false)
   })
 })
 
 describe('isCommentSignedByUser', () => {
   afterEach(resetEnv)
 
-  it('ignores comments from github-actions[bot]', () => {
-    expect(isCommentSignedByUser(CLA, 'github-actions[bot]')).toBe(false)
+  it('rejects every GitHub Bot actor type', () => {
+    expect(isCommentSignedByUser(CLA, 'renovate[bot]', 'Bot', 1001)).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'github-actions[bot]', 'Bot', 1001)).toBe(
+      false
+    )
+  })
+
+  it('rejects a bot-suffixed login even when actor type is missing or wrong', () => {
+    expect(isCommentSignedByUser(CLA, 'example[bot]', undefined, 1001)).toBe(
+      false
+    )
+    expect(isCommentSignedByUser(CLA, 'example[bot]', 'User', 1001)).toBe(false)
+  })
+
+  it('requires a GitHub User actor type and a positive safe integer ID', () => {
+    expect(isCommentSignedByUser(CLA, 'alice', undefined, 1001)).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'alice', 'Organization', 1001)).toBe(
+      false
+    )
+    expect(isCommentSignedByUser(CLA, 'alice', 'Mannequin', 1001)).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'alice', 'User', 0)).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'alice', 'User', -1)).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'alice', 'User', 1.5)).toBe(false)
+    expect(
+      isCommentSignedByUser(CLA, 'alice', 'User', Number.MAX_SAFE_INTEGER + 1)
+    ).toBe(false)
   })
 
   it('uses the CLA phrase by default', () => {
-    expect(isCommentSignedByUser(CLA, 'alice')).toBe(true)
-    expect(isCommentSignedByUser(DCO, 'alice')).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'alice', 'User', 1001)).toBe(true)
+    expect(isCommentSignedByUser(DCO, 'alice', 'User', 1001)).toBe(false)
   })
 
   it('uses the DCO phrase when use-dco-flag is true', () => {
     setInput('use-dco-flag', 'true')
-    expect(isCommentSignedByUser(DCO, 'alice')).toBe(true)
-    expect(isCommentSignedByUser(CLA, 'alice')).toBe(false)
+    expect(isCommentSignedByUser(DCO, 'alice', 'User', 1001)).toBe(true)
+    expect(isCommentSignedByUser(CLA, 'alice', 'User', 1001)).toBe(false)
   })
 
   it('uses the custom phrase when configured', () => {
     setInput('custom-pr-sign-comment', 'I accept the terms')
-    expect(isCommentSignedByUser('I accept the terms.', 'alice')).toBe(true)
-    expect(isCommentSignedByUser(CLA, 'alice')).toBe(false)
+    expect(
+      isCommentSignedByUser('I accept the terms', 'alice', 'User', 1001)
+    ).toBe(true)
+    expect(
+      isCommentSignedByUser('I accept the terms.', 'alice', 'User', 1001)
+    ).toBe(false)
+  })
+})
+
+describe('signatureWithPRComment', () => {
+  afterEach(resetEnv)
+
+  it('validates the commenter account ID instead of the comment ID', async () => {
+    setContext({ issueNumber: 42, payload: { repository: { id: 5555 } } })
+
+    const result = await signatureWithPRComment(
+      {
+        signed: [],
+        notSigned: [{ name: 'alice', id: 9001, pullRequestNo: 42 }],
+        unknown: []
+      },
+      [{ name: 'alice', id: 9001, pullRequestNo: 42 }],
+      [
+        {
+          id: 0,
+          body: CLA,
+          created_at: '2024-01-01T00:00:00Z',
+          updated_at: '2024-01-01T00:00:00Z',
+          user: { login: 'alice', id: 9001, type: 'User' }
+        }
+      ] as any
+    )
+
+    expect(result.newSigned.map(comment => comment.id)).toEqual([9001])
+    expect(result.onlyCommitters).toEqual([
+      { name: 'alice', id: 9001, pullRequestNo: 42 }
+    ])
   })
 })

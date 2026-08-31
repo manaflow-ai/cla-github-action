@@ -1,3 +1,4 @@
+import { context } from '@actions/github'
 import { Committer, CommitterMap } from '../interfaces'
 import * as input from '../shared/getInputs'
 import { getPrSignComment } from '../shared/pr-sign-comment'
@@ -18,6 +19,8 @@ const DCO: ModeText = {
   documentTitle: 'Developer Certificate of Origin',
   botName: 'DCO Assistant Lite bot'
 }
+
+const GITHUB_LOGIN = /^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i
 
 export function commentContent(
   signed: boolean,
@@ -60,10 +63,16 @@ function renderPending(mode: ModeText, committerMap: CommitterMap): string {
   if (committersCount > 1) {
     text += `**${committerMap.signed.length}** out of **${committerMap.signed.length + committerMap.notSigned.length}** committers have signed the ${mode.label}.`
     for (const s of committerMap.signed) {
-      text += `<br/>:white_check_mark: [${s.name}](https://github.com/${s.name})`
+      text += `<br/>:white_check_mark: ${renderGitHubProfile(s.name)}`
     }
     for (const u of committerMap.notSigned) {
-      text += `<br/>:x: @${u.name}`
+      const identity =
+        Number.isSafeInteger(u.id) && u.id > 0
+          ? u.isPullRequestOpener
+            ? renderGitHubMention(u.name)
+            : renderGitHubProfile(u.name)
+          : renderInertIdentity(u.name)
+      text += `<br/>:x: ${identity}`
     }
     text += '<br/>'
   }
@@ -86,7 +95,7 @@ function botSignature(mode: ModeText): string {
 }
 
 /**
- * Renders the "PR opener is not an author or co-author of any commit" block.
+ * Renders the "PR opener is not a commit identity" block.
  * Prepended to the rest of the comment so maintainers see it first. The
  * warning is either a hard block (require-opener-as-author=true; the default)
  * or a heads-up (require-opener-as-author=false, for repos with legitimate
@@ -99,15 +108,16 @@ function renderOpenerMismatchBlock(mismatch: {
 }): string {
   const authorList =
     mismatch.commitAuthors.length > 0
-      ? mismatch.commitAuthors.map(a => `@${a}`).join(', ')
-      : '*(no commit authors could be identified)*'
+      ? mismatch.commitAuthors.map(renderInertIdentity).join(', ')
+      : '*(no author or co-author identities could be identified)*'
+  const opener = renderGitHubMention(mismatch.opener)
 
   if (mismatch.hardFail) {
     return `> [!CAUTION]
 > **Pull Request opener is not an author or co-author of any commit in this PR.**
 >
-> - Opener: @${mismatch.opener}
-> - Commit authors: ${authorList}
+> - Opener: ${opener}
+> - Author/co-author identities: ${authorList}
 >
 > This check is blocked to guard against commits being submitted under a trusted identity the submitter does not control. If this PR is a legitimate cherry-pick, release-engineering submission, or mailing-list-style patch delivery, the repository maintainer can opt out of this check by setting \`require-opener-as-author: 'false'\` on the CLA-assistant step in the repository's workflow.
 
@@ -115,7 +125,7 @@ function renderOpenerMismatchBlock(mismatch: {
   }
 
   return `> [!NOTE]
-> Pull Request opener @${mismatch.opener} is not an author or co-author of any commit in this PR (commit authors: ${authorList}). The CLA check will still proceed and requires every listed author plus @${mismatch.opener} to have signed.
+> Pull Request opener ${opener} is not an author or co-author of any commit in this PR (commit identities: ${authorList}). The CLA check will still proceed and requires every listed identity plus ${opener} to have signed.
 
 `
 }
@@ -134,13 +144,14 @@ function renderUnlinkedCommitBlock(
   const verb = plural ? 'were' : 'was'
   const commits = plural ? 'commits' : 'commit'
 
-  // Render each unlinked identity as "name <email>" when we have an email to
-  // show, otherwise just the name. Wrap email in backticks so Markdown does
-  // not interpret it as a mailto: auto-link.
+  // Git names and emails are attacker-controlled commit metadata. Render
+  // them as escaped HTML code so Markdown, mentions, and links stay inert.
   const identityLines = unlinked
     .map(c => {
       const display =
-        c.email && c.email !== c.name ? `${c.name} \`<${c.email}>\`` : c.name
+        c.email && c.email !== c.name
+          ? `${renderInertIdentity(c.name)} ${renderInertIdentity(`<${c.email}>`)}`
+          : renderInertIdentity(c.name)
       return `- ${display}`
     })
     .join('\n')
@@ -170,4 +181,68 @@ function renderUnlinkedCommitBlock(
 >
 >    After the push, comment \`recheck\` on this PR (or just re-push) to re-run the check.
 <br/>`
+}
+
+function renderGitHubMention(login: string): string {
+  return GITHUB_LOGIN.test(login) ? `@${login}` : renderInertIdentity(login)
+}
+
+function renderGitHubProfile(login: string): string {
+  if (!GITHUB_LOGIN.test(login)) return renderInertIdentity(login)
+  const serverOrigin = getGitHubServerOrigin()
+  return serverOrigin
+    ? `[${login}](${serverOrigin}/${encodeURIComponent(login)})`
+    : renderInertIdentity(login)
+}
+
+/**
+ * Build profile links against the GitHub host that delivered this workflow.
+ * The Actions context is trusted runtime metadata, but parse it before placing
+ * it in Markdown so malformed or non-web values produce inert identity text.
+ */
+function getGitHubServerOrigin(): string | undefined {
+  const serverUrl = context.serverUrl
+  if (typeof serverUrl !== 'string' || serverUrl.trim().length === 0) {
+    // Older test doubles and custom runners may not expose serverUrl. Keep
+    // their historical public-GitHub rendering while real Actions contexts
+    // always provide the current server URL.
+    return 'https://github.com'
+  }
+
+  try {
+    const parsed = new URL(serverUrl)
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return undefined
+    }
+    return parsed.origin
+  } catch {
+    return undefined
+  }
+}
+
+function renderInertIdentity(value: string): string {
+  const normalized =
+    value
+      .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+      // Invisible Unicode format characters can reorder or hide attacker-
+      // controlled identities in a reviewer-facing comment. Keep them inert.
+      .replace(/\p{Cf}+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || '(unknown)'
+  return `<code>${escapeHtml(normalized)}</code>`
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
