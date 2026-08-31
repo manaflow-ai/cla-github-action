@@ -97,7 +97,7 @@ jobs:
     steps:
       - name: "CLA Assistant v2"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@76fc8306627c4f89d1d53e2d6fe8faf2087c013a
+        uses: manaflow-ai/cla-github-action@7c62e5b84b43229b22ac074812b45cdf54459f35
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only set this token for a remote signature repository. Prefer a
