@@ -114,6 +114,8 @@ The sample lets any Pull Request commenter use `recheck` only to refresh this ac
 
 The action exposes `signature_recorded=true` only after it persists a new signature. A separate rerun worker may use that output to refresh the exact failed check for the same Pull Request. Do not authorize a rerun from an arbitrary signing comment when this output is false.
 
+The action re-fetches accepted signing comments immediately before a ledger write. It rejects a comment that was edited, deleted, or moved to another identity during the run. GitHub does not provide one transaction for comments and repository contents, so a short race remains between this final check and the ledger write.
+
 > [!IMPORTANT]
 > **Pinning by commit SHA**
 >

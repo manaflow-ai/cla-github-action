@@ -27,6 +27,7 @@ import {
   listBoundedPullRequestComments,
   PullRequestComment
 } from './pullrequest/pullRequestComments'
+import { validateSigningCommentsUnchanged } from './pullrequest/signingCommentSnapshot'
 
 export async function setupClaCheck() {
   // A caller may use this output to authorize a follow-up check refresh. Keep
@@ -70,6 +71,10 @@ export async function setupClaCheck() {
 
     if (reactedCommitters?.newSigned.length) {
       /* pushing the recently signed  contributors to the CLA Json File */
+      await validateSigningCommentsUnchanged(
+        pullRequestComments,
+        reactedCommitters.newSigned
+      )
       await validateLivePullRequest(livePullRequest)
       await updateFile(sha, claFileContent, reactedCommitters)
       core.setOutput('signature_recorded', true)

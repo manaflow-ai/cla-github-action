@@ -67,6 +67,9 @@ commit that introduced it.
 - Git names and emails are rendered as escaped, inert text in bot comments.
   Attacker-controlled commit metadata cannot inject Markdown blocks, links,
   or account mentions.
+- Accepted signing comments are re-fetched from the bounded Pull Request
+  comment list immediately before a ledger write. An edited, deleted, or
+  identity-changed comment fails the run without changing the ledger.
 
 ### Changed
 
