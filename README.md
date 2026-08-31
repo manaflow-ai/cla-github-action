@@ -50,11 +50,10 @@ jobs:
       contents: write # this can be read if signatures are in a remote repository
       issues: write
       pull-requests: write
-    # Every job that can write the shared signature ledger, including a
-    # separate merged-PR lock job, must use this same group. Otherwise two
-    # Contents API writes can race on the ledger file SHA.
+    # Serialize runs for one Pull Request. The action uses a bounded merge
+    # retry when separate Pull Requests update the shared ledger together.
     concurrency:
-      group: cla-signatures-${{ github.repository }}
+      group: cla-signatures-${{ github.repository_id }}-${{ github.event.pull_request.number || github.event.issue.number }}
       # Keep cancellation disabled. GitHub retains one running and one
       # pending run for this group; a separate admission gate should reject
       # arbitrary comments before this queue.
@@ -73,7 +72,7 @@ jobs:
           fi
       - name: "CLA Assistant v2"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@09d64fa8ba8b77ae253f354be6e1564d49317fa3
+        uses: manaflow-ai/cla-github-action@61fbd0084262d50ac156ada18d08b13b557cfcb3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only set this token for a remote signature repository. Prefer a
@@ -86,6 +85,7 @@ jobs:
           # Initialize this branch, then restrict writes to trusted CLA automation.
           branch: 'cla-signatures'
           required-base-ref: 'main'
+          require-opener-as-author: 'true'
           # Add allowlist-ids only for a documented automated PR opener, using
           # that opener's numeric GitHub account ID. Never allowlist a name or
           # email from commit metadata.
@@ -110,6 +110,8 @@ Replace `<REPLACE_WITH_CLA_URL>` with the non-empty absolute HTTPS URL of the CL
 The job `if` guard must use the same signing declaration as the action, but GitHub expression equality is case-insensitive. The `Validate exact CLA comment` shell step provides the required case-sensitive comparison before the action runs. If you set `custom-pr-sign-comment`, replace the default declaration in the job guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the guard to run privileged code for every issue comment.
 
 The shell step and the action compare the raw comment body and do not trim whitespace. Contributors must post the declaration with no leading or trailing whitespace for it to count as an electronic signature. Keep the `pull_request_target.branches` filter and `required-base-ref` input set to the same protected branch. The event filter avoids unnecessary runs; the action input revalidates the live base branch before a write or lock.
+
+This version accepts signing and `recheck` only on newly created comments. It rejects `issue_comment` `edited` events. Do not add an `edited` trigger unless a later action version validates the edited event and the exact updated declaration at runtime.
 
 The sample lets any Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch.
 
@@ -149,7 +151,7 @@ The action re-fetches accepted signing comments immediately before a ledger writ
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: manaflow-ai/cla-github-action@09d64fa8ba8b77ae253f354be6e1564d49317fa3
+> uses: manaflow-ai/cla-github-action@61fbd0084262d50ac156ada18d08b13b557cfcb3
 > ```
 >
 > Tools like [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
@@ -194,7 +196,7 @@ After the contributor signed a CLA, the contributor's signature with metadata wi
 
 Protect the signature ledger from normal collaborator writes. Use a repository ruleset that permits only the trusted CLA automation identity, or store the ledger in a private repository where only that identity can write. The action token or configured App/PAT must have permission to update the protected target.
 
-If you split merged-pull-request locking into another job, give that job the same `cla-signatures-${{ github.repository }}` concurrency group and set `cancel-in-progress: false`. This serializes lock and ledger writes while retaining GitHub's bounded default queue.
+If you split merged-pull-request locking into another job, use the same `cla-signatures-${{ github.repository_id }}-${{ github.event.pull_request.number || github.event.issue.number }}` group and set `cancel-in-progress: false`. The lock and signature jobs for one Pull Request must not run together.
 
 Ledger entries do not contain a CLA document hash or terms version. If the CLA text changes, use a new ledger path and signing declaration, and require contributors to sign again. Without this policy, an old ledger entry cannot prove which document version the contributor accepted.
 
