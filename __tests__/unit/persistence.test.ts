@@ -204,6 +204,62 @@ describe('persistence', () => {
       ])
     })
 
+    it('merges a concurrent ledger update after a contents conflict', async () => {
+      http
+        .github()
+        .intercept({
+          path: '/repos/acme/widgets/contents/signatures%2Fv1%2Fcla.json',
+          method: 'PUT'
+        })
+        .reply(409, { message: 'sha does not match' })
+      http
+        .github()
+        .intercept({
+          path: '/repos/acme/widgets/contents/signatures%2Fv1%2Fcla.json?ref=main',
+          method: 'GET'
+        })
+        .reply(
+          200,
+          {
+            sha: 'latestsha',
+            content: Buffer.from(
+              JSON.stringify({
+                signedContributors: [{ name: 'carol', id: 3 }]
+              })
+            ).toString('base64')
+          },
+          { headers: { 'content-type': 'application/json' } }
+        )
+      const captured = captureJson(
+        http.github(),
+        {
+          path: '/repos/acme/widgets/contents/signatures%2Fv1%2Fcla.json',
+          method: 'PUT'
+        },
+        { status: 200, body: { content: { sha: 'new' } } }
+      )
+
+      const { updateFile } = loadPersistence()
+      await updateFile(
+        'oldsha',
+        { signedContributors: [{ name: 'alice', id: 1 }] },
+        {
+          newSigned: [{ name: 'bob', id: 2 }],
+          allSignedFlag: true
+        } as any
+      )
+
+      expect(captured.body?.sha).toBe('latestsha')
+      const decoded = JSON.parse(
+        Buffer.from(captured.body!.content, 'base64').toString()
+      )
+      expect(decoded.signedContributors).toEqual([
+        { name: 'carol', id: 3 },
+        { name: 'bob', id: 2 }
+      ])
+      http.assertClean()
+    })
+
     it('rejects a serialized ledger larger than 1000000 bytes before writing', async () => {
       const { updateFile } = loadPersistence()
       await expect(

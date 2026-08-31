@@ -48431,6 +48431,10 @@ const MAX_PULL_REQUEST_COMMENTS = 1000;
 const MAX_LEDGER_SIGNATURES = 10_000;
 // GitHub's Contents API only supports files up to 1 MB.
 const MAX_LEDGER_BYTES = 1_000_000;
+// Concurrent pull requests write the shared ledger with optimistic locking.
+// Keep retries bounded so a persistent conflict cannot turn into a runner
+// hang or an unbounded API loop.
+const MAX_LEDGER_WRITE_ATTEMPTS = 3;
 
 ;// CONCATENATED MODULE: ./src/persistence/persistence.ts
 
@@ -48471,32 +48475,94 @@ async function createFile(contentBinary) {
 async function updateFile(sha, claFileContent, reactedCommitters) {
     const t = resolveSignaturesTarget();
     const pullRequestNo = github_context.issue.number;
-    const updated = {
-        signedContributors: dedupeSignatures([
-            ...claFileContent.signedContributors,
-            ...reactedCommitters.newSigned
-        ])
-    };
-    const serialized = JSON.stringify(updated, null, 2);
-    if (Buffer.byteLength(serialized) > MAX_LEDGER_BYTES) {
-        throw new Error(`Cannot persist a CLA signature ledger larger than ${MAX_LEDGER_BYTES} bytes`);
+    let currentSha = sha;
+    let currentContent = claFileContent;
+    // The ledger is shared by all Pull Requests. Per-PR workflow concurrency
+    // prevents duplicate work for one PR, while this bounded optimistic retry
+    // merges another PR's commit when two independent writers race.
+    for (let attempt = 0; attempt < MAX_LEDGER_WRITE_ATTEMPTS; attempt += 1) {
+        const updated = {
+            signedContributors: dedupeSignatures([
+                ...currentContent.signedContributors,
+                ...reactedCommitters.newSigned
+            ])
+        };
+        const serialized = JSON.stringify(updated, null, 2);
+        if (Buffer.byteLength(serialized) > MAX_LEDGER_BYTES) {
+            throw new Error(`Cannot persist a CLA signature ledger larger than ${MAX_LEDGER_BYTES} bytes`);
+        }
+        const contentBinary = Buffer.from(serialized).toString('base64');
+        try {
+            await t.octokit.rest.repos.createOrUpdateFileContents({
+                owner: t.owner,
+                repo: t.repo,
+                path: t.path,
+                sha: currentSha,
+                message: buildSignedCommitMessage(pullRequestNo),
+                content: contentBinary,
+                branch: t.branch
+            });
+            return;
+        }
+        catch (error) {
+            if (!isContentsConflict(error) ||
+                attempt + 1 >= MAX_LEDGER_WRITE_ATTEMPTS) {
+                throw error;
+            }
+            const latest = parseLedgerSnapshot(await getFileContent());
+            currentSha = latest.sha;
+            currentContent = latest.content;
+        }
     }
-    const contentBinary = Buffer.from(serialized).toString('base64');
-    await t.octokit.rest.repos.createOrUpdateFileContents({
-        owner: t.owner,
-        repo: t.repo,
-        path: t.path,
-        sha,
-        message: buildSignedCommitMessage(pullRequestNo),
-        content: contentBinary,
-        branch: t.branch
-    });
+    throw new Error('Could not persist the CLA signature ledger after bounded retries');
+}
+function parseLedgerSnapshot(response) {
+    const data = response?.data;
+    if (!data ||
+        Array.isArray(data) ||
+        typeof data.sha !== 'string' ||
+        data.sha.length === 0 ||
+        typeof data.content !== 'string') {
+        throw new Error('Invalid CLA signature ledger response');
+    }
+    const raw = Buffer.from(data.content, 'base64');
+    if (raw.byteLength > MAX_LEDGER_BYTES) {
+        throw new Error(`Invalid CLA signature ledger: file is larger than ${MAX_LEDGER_BYTES} bytes`);
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw.toString());
+    }
+    catch {
+        throw new Error('Invalid CLA signature ledger: file is not valid JSON');
+    }
+    if (!parsed ||
+        typeof parsed !== 'object' ||
+        !Array.isArray(parsed.signedContributors)) {
+        throw new Error('Invalid CLA signature ledger: signedContributors must be an array');
+    }
+    const signatures = parsed
+        .signedContributors;
+    if (signatures.length > MAX_LEDGER_SIGNATURES) {
+        throw new Error(`Invalid CLA signature ledger: more than ${MAX_LEDGER_SIGNATURES} signatures`);
+    }
+    return {
+        sha: data.sha,
+        content: {
+            signedContributors: dedupeSignatures(signatures)
+        }
+    };
+}
+function isContentsConflict(error) {
+    return (typeof error === 'object' &&
+        error !== null &&
+        error.status === 409);
 }
 function dedupeSignatures(signatures) {
     const seen = new Set();
-    const deduped = signatures.filter(signature => {
-        if (!Number.isSafeInteger(signature.id) || signature.id <= 0) {
-            throw new Error('Cannot persist a CLA signature without a valid user ID');
+    const deduped = signatures.filter((signature) => {
+        if (!isValidSignature(signature)) {
+            throw new Error('Cannot persist a CLA signature without a non-empty name and valid user ID');
         }
         if (seen.has(signature.id))
             return false;
@@ -48507,6 +48573,16 @@ function dedupeSignatures(signatures) {
         throw new Error(`Cannot persist more than ${MAX_LEDGER_SIGNATURES} CLA signatures in one ledger`);
     }
     return deduped;
+}
+function isValidSignature(value) {
+    if (!value || typeof value !== 'object')
+        return false;
+    const candidate = value;
+    return (typeof candidate.name === 'string' &&
+        candidate.name.trim().length > 0 &&
+        typeof candidate.id === 'number' &&
+        Number.isSafeInteger(candidate.id) &&
+        candidate.id > 0);
 }
 function buildSignedCommitMessage(pullRequestNo) {
     const template = getSignedCommitMessage();
@@ -49286,7 +49362,7 @@ function parseClaFileContent(raw) {
     }
     const byId = new Map();
     for (const value of signatures) {
-        if (!isValidSignature(value)) {
+        if (!setupClaCheck_isValidSignature(value)) {
             throw new Error('Invalid CLA signature ledger: every entry must have a non-empty name and positive numeric id');
         }
         if (!byId.has(value.id))
@@ -49297,7 +49373,7 @@ function parseClaFileContent(raw) {
     }
     return { signedContributors: [...byId.values()] };
 }
-function isValidSignature(value) {
+function setupClaCheck_isValidSignature(value) {
     if (!value || typeof value !== 'object')
         return false;
     const candidate = value;
