@@ -71,6 +71,20 @@ describe('isCommentSignedByUser', () => {
     expect(isCommentSignedByUser(CLA, 'example[bot]', 'User')).toBe(false)
   })
 
+  it('requires a GitHub User actor type and a positive safe integer ID', () => {
+    expect(isCommentSignedByUser(CLA, 'alice', undefined, 1001)).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'alice', 'Organization', 1001)).toBe(
+      false
+    )
+    expect(isCommentSignedByUser(CLA, 'alice', 'Mannequin', 1001)).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'alice', 'User', 0)).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'alice', 'User', -1)).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'alice', 'User', 1.5)).toBe(false)
+    expect(
+      isCommentSignedByUser(CLA, 'alice', 'User', Number.MAX_SAFE_INTEGER + 1)
+    ).toBe(false)
+  })
+
   it('uses the CLA phrase by default', () => {
     expect(isCommentSignedByUser(CLA, 'alice', 'User')).toBe(true)
     expect(isCommentSignedByUser(DCO, 'alice', 'User')).toBe(false)
