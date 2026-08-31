@@ -49177,6 +49177,7 @@ function detectOpenerMismatch(commitAuthors, opener) {
 
 
 
+
 async function lockPullRequest() {
     const pullRequestNo = github_context.issue.number;
     try {
@@ -49188,7 +49189,7 @@ async function lockPullRequest() {
         info(`Locked pull request ${pullRequestNo} to safeguard CLA signatures`);
     }
     catch (e) {
-        error(`Failed to lock pull request ${pullRequestNo}`);
+        throw new Error(`Failed to lock pull request ${pullRequestNo}: ${errorMessage(e)}`);
     }
 }
 

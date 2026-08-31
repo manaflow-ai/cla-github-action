@@ -45,6 +45,8 @@ commit that introduced it.
   assertions fail closed to bound work on untrusted GraphQL data.
 - The action no longer unlocks a reopened Pull Request. It preserves
   maintainer locks and tells maintainers to unlock the conversation manually.
+- A failed request to lock a merged Pull Request now fails the action instead
+  of reporting success with an unlocked signature comment.
 
 ### Changed
 

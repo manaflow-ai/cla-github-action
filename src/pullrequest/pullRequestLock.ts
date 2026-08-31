@@ -1,6 +1,7 @@
 import { octokit } from '../octokit'
 import * as core from '@actions/core'
 import { context } from '@actions/github'
+import { errorMessage } from '../shared/errors'
 
 export async function lockPullRequest() {
   const pullRequestNo = context.issue.number
@@ -14,6 +15,8 @@ export async function lockPullRequest() {
       `Locked pull request ${pullRequestNo} to safeguard CLA signatures`
     )
   } catch (e) {
-    core.error(`Failed to lock pull request ${pullRequestNo}`)
+    throw new Error(
+      `Failed to lock pull request ${pullRequestNo}: ${errorMessage(e)}`
+    )
   }
 }
