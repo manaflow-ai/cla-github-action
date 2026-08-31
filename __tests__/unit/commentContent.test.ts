@@ -42,6 +42,33 @@ describe('commentContent (CLA mode)', () => {
     expect(body).toContain(':x: @bob')
   })
 
+  it('keeps mapped commit identities inert unless they are the authenticated opener', () => {
+    const body = commentContent(
+      false,
+      committerMap({
+        notSigned: [
+          {
+            name: 'mapped-account',
+            id: 1234,
+            pullRequestNo: 7,
+            requiresCurrentSignature: true,
+            isPrimaryAuthor: true
+          },
+          {
+            name: 'opener-account',
+            id: 5678,
+            pullRequestNo: 7,
+            isPullRequestOpener: true
+          }
+        ]
+      })
+    )
+
+    expect(body).toContain('<code>mapped-account</code>')
+    expect(body).not.toContain('@mapped-account')
+    expect(body).toContain(':x: @opener-account')
+  })
+
   it('uses singular "you" language when only one committer', () => {
     const body = commentContent(
       false,
