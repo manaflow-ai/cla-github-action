@@ -4,27 +4,34 @@ import { context } from '@actions/github'
 import { setupClaCheck } from '../src/setupClaCheck'
 import { lockPullRequest } from '../src/pullrequest/pullRequestLock'
 import { run } from '../src/main'
+import { validateMergedPullRequestForLock } from '../src/livePullRequest'
 
 jest.mock('@actions/core')
 jest.mock('@actions/github')
 jest.mock('../src/pullrequest/pullRequestLock')
 jest.mock('../src/setupClaCheck')
+jest.mock('../src/livePullRequest')
 const mockedGetClas = jest.mocked(setupClaCheck)
 const mockedLockPullRequest = jest.mocked(lockPullRequest)
 const mockedCoreGetInput = jest.mocked(core.getInput)
 const mockedCoreWarning = jest.mocked(core.warning)
+const mockedValidateMergedPullRequestForLock = jest.mocked(
+  validateMergedPullRequestForLock
+)
 
 describe('Pull request event', () => {
   beforeEach(async () => {
     mockedGetClas.mockReset()
     mockedLockPullRequest.mockReset()
     mockedCoreWarning.mockReset()
+    mockedValidateMergedPullRequestForLock.mockReset()
+    mockedValidateMergedPullRequestForLock.mockResolvedValue()
     mockedCoreGetInput.mockImplementation((name: string) =>
       name === 'lock-pullrequest-aftermerge' ? 'true' : ''
     )
     // @ts-ignore
     github.context = {
-      eventName: 'pull_request',
+      eventName: 'pull_request_target',
       ref: 'refs/pull/232/merge',
       workflow: 'CLA Assistant',
       action: 'ibakshaygithub-action-1',
@@ -63,7 +70,17 @@ describe('Pull request event', () => {
 
   test('the lockPullRequest  method should be called if there is a pull request merge/closed', async () => {
     await run()
+    expect(mockedValidateMergedPullRequestForLock).toHaveBeenCalled()
     expect(mockedLockPullRequest).toHaveBeenCalled()
+  })
+
+  test('a failed merged Pull Request validation prevents locking', async () => {
+    mockedValidateMergedPullRequestForLock.mockRejectedValueOnce(
+      new Error('live identity mismatch')
+    )
+    await run()
+    expect(mockedLockPullRequest).not.toHaveBeenCalled()
+    expect(core.setFailed).toHaveBeenCalledWith('live identity mismatch')
   })
 
   test('the checkcla  method should not called if there is a pull request merge/closed', async () => {

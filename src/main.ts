@@ -4,6 +4,7 @@ import { lockPullRequest } from './pullrequest/pullRequestLock'
 
 import * as core from '@actions/core'
 import * as input from './shared/getInputs'
+import { validateMergedPullRequestForLock } from './livePullRequest'
 
 export async function run() {
   try {
@@ -14,6 +15,7 @@ export async function run() {
       input.lockPullRequestAfterMerge()
     ) {
       if (context.payload.pull_request?.merged) {
+        await validateMergedPullRequestForLock()
         return lockPullRequest()
       }
       core.info(

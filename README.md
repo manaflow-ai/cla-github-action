@@ -133,11 +133,11 @@ The action fails closed for every unlinked committer, including metadata that cl
 GitHub can map an author, co-author, or committer email to an account ID, but this mapping does not authenticate authorship. Every non-opener identity from git metadata must post the exact declaration on the current Pull Request. A stored signature is reusable only for the account authenticated by the live Pull Request API as the opener. A committer-only match does not satisfy the opener author/co-author guard.
 <br/> When the CLA workflow is triggered on pull request `closed` event and the Pull Request was merged, it will lock the Pull Request conversation so that the contributors cannot modify or delete the signatures (Pull Request comment) later. This feature is optional. A failed lock request fails the action. The action never removes a conversation lock. A maintainer must unlock a reopened Pull Request before contributors can sign.
 
-The action fails closed when a Pull Request has more than 1,000 commits or more than 1,000 git identity assertions. These limits bound work on untrusted Pull Request data. Split a larger contribution before running the CLA check.
+The action fails closed when a Pull Request has more than 1,000 commits, more than 1,000 git identity assertions, or more than 1,000 comments. A signature ledger also fails closed above 10,000 entries or 2 MiB. These limits bound work on untrusted Pull Request and ledger data. Split a larger contribution or start a new versioned ledger before running the CLA check.
 
 #### 3. Signing the CLA
 
-CLA workflow creates a comment on Pull Request asking contributors who have not signed  CLA to sign and also fails the pull request status check with a `failure`. Contributors must post a new comment with **"I have read the CLA Document and I hereby sign the CLA"** as the full Pull Request comment body. Case, wording, punctuation, and internal whitespace must match. An edited comment does not trigger the workflow. Put `recheck` in a separate new comment.
+CLA workflow creates a comment on Pull Request asking contributors who have not signed  CLA to sign and also fails the pull request status check with a `failure`. Contributors must post a new comment with **"I have read the CLA Document and I hereby sign the CLA"** as the full Pull Request comment body. Surrounding whitespace and blank lines are ignored. Case, wording, punctuation, and internal whitespace must match. An edited comment does not trigger the workflow. Put `recheck` in a separate new comment.
 If the contributor has already signed the CLA, then the PR status will pass with `success`. <br/>
 
 This action does not rerun an earlier workflow after it records a signature. Repositories that need an immediate required-check update must use a separate trusted job. That job must bind the rerun to the current Pull Request number, head commit SHA, workflow file, and base branch before it calls the Actions rerun API.
@@ -153,6 +153,8 @@ This action does not rerun an earlier workflow after it records a signature. Rep
 After the contributor signed a CLA, the contributor's signature with metadata will be stored in a JSON file inside the repository and you can specify the custom path to this file with `path-to-signatures` input in the workflow. <br/> The default path is `path-to-signatures: 'signatures/version1/cla.json'`.
 
 Protect the signature ledger from normal collaborator writes. Use a repository ruleset that permits only the trusted CLA automation identity, or store the ledger in a private repository where only that identity can write. The action token or configured App/PAT must have permission to update the protected target.
+
+Ledger entries do not contain a CLA document hash or terms version. If the CLA text changes, use a new ledger path and signing declaration, and require contributors to sign again. Without this policy, an old ledger entry cannot prove which document version the contributor accepted.
 
 The signature can be also stored in a remote repository which can be done by enabling the optional inputs `remote-organization-name`: `<your org name>`
 and `remote-repository-name`: `<your repo name>` in your CLA workflow file.

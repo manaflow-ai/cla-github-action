@@ -4,6 +4,7 @@ import { ClaFileContent, ReactedCommitterMap } from '../interfaces'
 import { Octokit, getDefaultOctokitClient, getPATOctokit } from '../octokit'
 
 import * as input from '../shared/getInputs'
+import { MAX_LEDGER_SIGNATURES } from '../shared/limits'
 
 interface SignaturesTarget {
   octokit: Octokit
@@ -81,7 +82,7 @@ function dedupeSignatures(
   signatures: ClaFileContent['signedContributors']
 ): ClaFileContent['signedContributors'] {
   const seen = new Set<number>()
-  return signatures.filter(signature => {
+  const deduped = signatures.filter(signature => {
     if (!Number.isSafeInteger(signature.id) || signature.id <= 0) {
       throw new Error('Cannot persist a CLA signature without a valid user ID')
     }
@@ -89,6 +90,12 @@ function dedupeSignatures(
     seen.add(signature.id)
     return true
   })
+  if (deduped.length > MAX_LEDGER_SIGNATURES) {
+    throw new Error(
+      `Cannot persist more than ${MAX_LEDGER_SIGNATURES} CLA signatures in one ledger`
+    )
+  }
+  return deduped
 }
 
 function buildSignedCommitMessage(pullRequestNo: number): string {

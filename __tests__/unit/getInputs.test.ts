@@ -46,6 +46,10 @@ describe('getInputs wrappers', () => {
     expect(inputs.getBranch()).toBe('')
   })
 
+  it('keeps the upstream master default for the required base branch', () => {
+    expect(inputs.getRequiredBaseRef()).toBe('master')
+  })
+
   it('trims whitespace around the input value (core.getInput behaviour)', () => {
     setInput('branch', '  main  ')
     expect(inputs.getBranch()).toBe('main')

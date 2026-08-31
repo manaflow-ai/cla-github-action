@@ -22,6 +22,10 @@ import {
   LivePullRequestSnapshot,
   validateLivePullRequest
 } from './livePullRequest'
+import {
+  MAX_LEDGER_BYTES,
+  MAX_LEDGER_SIGNATURES
+} from './shared/limits'
 
 export async function setupClaCheck() {
   const livePullRequest = await validateLivePullRequest()
@@ -109,7 +113,16 @@ async function getCLAFileContentandSHA(
     }
   }
   sha = result?.data?.sha
-  claFileContentString = Buffer.from(result.data.content, 'base64').toString()
+  if (typeof result.data.content !== 'string') {
+    throw new Error('Invalid CLA signature ledger: file content is missing')
+  }
+  const claFileContentBuffer = Buffer.from(result.data.content, 'base64')
+  if (claFileContentBuffer.byteLength > MAX_LEDGER_BYTES) {
+    throw new Error(
+      `Invalid CLA signature ledger: file is larger than ${MAX_LEDGER_BYTES} bytes`
+    )
+  }
+  claFileContentString = claFileContentBuffer.toString()
   claFileContent = parseClaFileContent(claFileContentString)
   return { claFileContent, sha }
 }
@@ -136,6 +149,11 @@ function parseClaFileContent(raw: string): ClaFileContent {
 
   const signatures = (parsed as { signedContributors: unknown[] })
     .signedContributors
+  if (signatures.length > MAX_LEDGER_SIGNATURES) {
+    throw new Error(
+      `Invalid CLA signature ledger: more than ${MAX_LEDGER_SIGNATURES} signatures`
+    )
+  }
   const byId = new Map<number, Signature>()
   for (const value of signatures) {
     if (!isValidSignature(value)) {

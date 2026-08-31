@@ -6,6 +6,7 @@ import { CommitterMap, Committer, ReactedCommitterMap } from '../interfaces'
 import { getUseDcoFlag } from '../shared/getInputs'
 import { errorMessage } from '../shared/errors'
 import * as core from '@actions/core'
+import { listBoundedPullRequestComments } from './pullRequestComments'
 
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]'
 
@@ -90,12 +91,7 @@ async function updateComment(
 
 async function getComment() {
   try {
-    const comments = await octokit.paginate(octokit.rest.issues.listComments, {
-      owner: context.repo.owner,
-      repo: context.repo.repo,
-      issue_number: context.issue.number,
-      per_page: 100
-    })
+    const comments = await listBoundedPullRequestComments()
     const marker = getUseDcoFlag()
       ? /.*DCO Assistant Lite bot.*/m
       : /.*CLA Assistant Lite bot.*/m

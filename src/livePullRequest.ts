@@ -123,19 +123,82 @@ export async function validateLivePullRequest(
   return snapshot
 }
 
-function validateEvent(repository: string): number {
-  const payloadRepository = context.payload.repository?.full_name
-  const payloadRepositoryId = context.payload.repository?.id
+/**
+ * Re-fetch and authenticate a closed merged Pull Request before the action
+ * locks its conversation. A pull_request_target payload is trusted only when
+ * its full repository, ref, commit, opener, state, and merge identity match
+ * the live Pull Request API response.
+ */
+export async function validateMergedPullRequestForLock(): Promise<void> {
+  const repository = `${context.repo.owner}/${context.repo.repo}`
+  const repositoryId = validateEventRepository(repository)
+  const eventPullRequest = context.payload.pull_request
   if (
-    typeof payloadRepository !== 'string' ||
-    payloadRepository.toLowerCase() !== repository.toLowerCase() ||
-    !Number.isSafeInteger(payloadRepositoryId) ||
-    Number(payloadRepositoryId) <= 0
+    context.eventName !== 'pull_request_target' ||
+    context.payload.action !== 'closed' ||
+    !eventPullRequest ||
+    eventPullRequest.number !== context.issue.number ||
+    eventPullRequest.state !== 'closed' ||
+    eventPullRequest.merged !== true
   ) {
     throw new Error(
-      `Event repository does not match ${repository}; refusing CLA processing`
+      'Event is not a closed merged pull_request_target event; refusing to lock'
     )
   }
+
+  const response = await octokit.rest.pulls.get({
+    owner: context.repo.owner,
+    repo: context.repo.repo,
+    pull_number: context.issue.number
+  })
+  const pullRequest = response.data
+  const requiredBaseRef = getRequiredBaseRef()
+  const liveBaseRepository = pullRequest.base.repo
+  const liveHeadRepository = pullRequest.head.repo
+  const opener = pullRequest.user
+
+  if (
+    pullRequest.state !== 'closed' ||
+    pullRequest.merged !== true ||
+    pullRequest.base.ref !== requiredBaseRef ||
+    liveBaseRepository?.full_name?.toLowerCase() !== repository.toLowerCase() ||
+    liveBaseRepository?.id !== repositoryId ||
+    !pullRequest.head.sha?.trim() ||
+    !pullRequest.head.ref?.trim() ||
+    !liveHeadRepository?.full_name?.trim() ||
+    !Number.isSafeInteger(liveHeadRepository?.id) ||
+    Number(liveHeadRepository?.id) <= 0 ||
+    !opener ||
+    !Number.isSafeInteger(opener.id) ||
+    opener.id <= 0 ||
+    !opener.login?.trim()
+  ) {
+    throw new Error(
+      'Live Pull Request is not a complete closed merged Pull Request; refusing to lock'
+    )
+  }
+
+  if (
+    eventPullRequest.head?.sha !== pullRequest.head.sha ||
+    eventPullRequest.head.ref !== pullRequest.head.ref ||
+    eventPullRequest.head.repo?.full_name?.toLowerCase() !==
+      liveHeadRepository.full_name.toLowerCase() ||
+    eventPullRequest.head.repo?.id !== liveHeadRepository.id ||
+    eventPullRequest.base?.ref !== pullRequest.base.ref ||
+    eventPullRequest.base.repo?.full_name?.toLowerCase() !==
+      liveBaseRepository.full_name.toLowerCase() ||
+    eventPullRequest.base.repo?.id !== liveBaseRepository.id ||
+    eventPullRequest.user?.id !== opener.id ||
+    eventPullRequest.user.login.toLowerCase() !== opener.login.toLowerCase()
+  ) {
+    throw new Error(
+      'Closed Pull Request event does not match the live merged Pull Request identity; refusing to lock'
+    )
+  }
+}
+
+function validateEvent(repository: string): number {
+  const payloadRepositoryId = validateEventRepository(repository)
 
   if (context.eventName === 'issue_comment') {
     const issue = context.payload.issue
@@ -170,6 +233,22 @@ function validateEvent(repository: string): number {
   throw new Error(
     `Event '${context.eventName}' is not allowed to write CLA signatures`
   )
+}
+
+function validateEventRepository(repository: string): number {
+  const payloadRepository = context.payload.repository?.full_name
+  const payloadRepositoryId = context.payload.repository?.id
+  if (
+    typeof payloadRepository !== 'string' ||
+    payloadRepository.toLowerCase() !== repository.toLowerCase() ||
+    !Number.isSafeInteger(payloadRepositoryId) ||
+    Number(payloadRepositoryId) <= 0
+  ) {
+    throw new Error(
+      `Event repository does not match ${repository}; refusing CLA processing`
+    )
+  }
+  return Number(payloadRepositoryId)
 }
 
 function validatePayloadAgainstLive(

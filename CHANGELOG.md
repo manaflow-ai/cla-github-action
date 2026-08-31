@@ -47,6 +47,10 @@ commit that introduced it.
   maintainer locks and tells maintainers to unlock the conversation manually.
 - A failed request to lock a merged Pull Request now fails the action instead
   of reporting success with an unlocked signature comment.
+- Pull Requests with more than 1,000 comments and signature ledgers with more
+  than 10,000 entries or 2 MiB fail closed.
+- A closed event is re-fetched and matched by repository IDs, refs, head SHA,
+  opener, state, and merge result before the action locks the conversation.
 
 ### Changed
 

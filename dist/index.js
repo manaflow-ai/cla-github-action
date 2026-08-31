@@ -48525,18 +48525,45 @@ function getPrSignComment() {
         : DEFAULT_CLA_SIGN_PHRASE;
 }
 
+;// CONCATENATED MODULE: ./src/shared/limits.ts
+/** Fail-closed bounds for data controlled by Pull Request contributors. */
+const MAX_PULL_REQUEST_COMMENTS = 1000;
+const MAX_LEDGER_SIGNATURES = 10_000;
+const MAX_LEDGER_BYTES = (/* unused pure expression or super */ null && (2 * 1024 * 1024));
+
+;// CONCATENATED MODULE: ./src/pullrequest/pullRequestComments.ts
+
+
+
+/**
+ * List every Pull Request comment while bounding work on contributor-controlled
+ * input. The extra page that crosses the limit is read only to prove that the
+ * limit was exceeded, then the action fails closed.
+ */
+async function listBoundedPullRequestComments() {
+    let observed = 0;
+    return octokit.paginate(octokit.rest.issues.listComments, {
+        owner: github_context.repo.owner,
+        repo: github_context.repo.repo,
+        issue_number: github_context.issue.number,
+        per_page: 100
+    }, response => {
+        const page = response.data;
+        observed += page.length;
+        if (observed > MAX_PULL_REQUEST_COMMENTS) {
+            throw new Error(`A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`);
+        }
+        return page;
+    });
+}
+
 ;// CONCATENATED MODULE: ./src/pullrequest/signatureComment.ts
 
 
 
 async function signatureWithPRComment(committerMap, committers) {
     const repoId = github_context.payload.repository?.id;
-    const allComments = await octokit.paginate(octokit.rest.issues.listComments, {
-        owner: github_context.repo.owner,
-        repo: github_context.repo.repo,
-        issue_number: github_context.issue.number,
-        per_page: 100
-    });
+    const allComments = await listBoundedPullRequestComments();
     const listOfPRComments = [];
     const filteredListOfPRComments = [];
     for (const prComment of allComments) {

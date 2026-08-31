@@ -7,18 +7,14 @@ import {
   SigningComment
 } from '../interfaces'
 import { getPrSignComment } from '../shared/pr-sign-comment'
+import { listBoundedPullRequestComments } from './pullRequestComments'
 
 export default async function signatureWithPRComment(
   committerMap: CommitterMap,
   committers: Committer[]
 ): Promise<ReactedCommitterMap> {
   const repoId = context.payload.repository?.id
-  const allComments = await octokit.paginate(octokit.rest.issues.listComments, {
-    owner: context.repo.owner,
-    repo: context.repo.repo,
-    issue_number: context.issue.number,
-    per_page: 100
-  })
+  const allComments = await listBoundedPullRequestComments()
   const listOfPRComments: SigningComment[] = []
   const filteredListOfPRComments: SigningComment[] = []
 
