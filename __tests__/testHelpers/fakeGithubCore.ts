@@ -29,6 +29,8 @@ export interface PullRequest {
   number: number
   /** Test-only REST response number override for identity validation. */
   apiNumber?: number
+  /** Test-only GraphQL head OID override for identity binding coverage. */
+  graphqlHeadRefOid?: string
   /** Test-only GraphQL totalCount override for fail-closed limit coverage. */
   reportedCommitTotalCount?: number
   head: {
@@ -514,6 +516,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       data: {
         repository: {
           pullRequest: {
+            headRefOid: pr.graphqlHeadRefOid ?? pr.head.sha,
             commits: {
               totalCount: pr.reportedCommitTotalCount ?? edges.length,
               edges,

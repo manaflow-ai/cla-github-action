@@ -1687,6 +1687,43 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('rejects commit identities from a GraphQL head different from the live PR head', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    repository.addPullRequest({
+      number: 44,
+      graphqlHeadRefOid: 'transient-head-sha',
+      head: { sha: 'headsha', ref: 'feature/graphql-head-binding' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 44,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 44,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: repository.state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /GraphQL Pull Request head commit does not match the live Pull Request head/i
+    )
+    expect(repository.getFile('signatures/cla.json')).toBeUndefined()
+    expect(repository.listComments(44)).toHaveLength(0)
+    watch.restore()
+  })
+
   it('accepts an edited event for an open Pull Request that still targets main', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
