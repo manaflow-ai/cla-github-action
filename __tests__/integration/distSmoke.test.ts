@@ -209,14 +209,42 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
   }, 20000)
 
   it('bundled action calls the lock endpoint on a merged PR close event', async () => {
+    const repositoryId = fake.repo('acme', 'widgets').state.id
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 10,
+      head: {
+        sha: 'headsha',
+        ref: 'feature/merged',
+        apiRef: 'feature/merged'
+      },
+      user: { login: 'alice', id: 1001 },
+      merged: true,
+      state: 'closed',
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
     const eventPath = writeEventFile({
       action: 'closed',
-      pull_request: { number: 10, merged: true }
+      pull_request: {
+        number: 10,
+        state: 'closed',
+        merged: true,
+        head: {
+          sha: 'headsha',
+          ref: 'feature/merged',
+          repo: { full_name: 'acme/widgets', id: repositoryId }
+        },
+        base: {
+          ref: 'main',
+          repo: { full_name: 'acme/widgets', id: repositoryId }
+        },
+        user: { login: 'alice', id: 1001 }
+      },
+      repository: { id: repositoryId, full_name: 'acme/widgets' }
     })
 
     const result = await runDist({
       ...defaultInputEnv(),
-      ...githubEnv(fake, { eventName: 'pull_request', eventPath })
+      ...githubEnv(fake, { eventName: 'pull_request_target', eventPath })
     })
 
     expect(result.code).toBe(0)
