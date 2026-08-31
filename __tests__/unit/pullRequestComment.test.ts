@@ -7,10 +7,14 @@ import { resetEnv, setDefaultInputs } from '../testHelpers/env'
 import { reloadOctokit, setContext } from '../testHelpers/context'
 
 const modulePath = require.resolve('../../src/pullrequest/pullRequestComment')
-function loadModule() {
+function loadCommentModule() {
   reloadOctokit()
   delete require.cache[modulePath]
-  return require('../../src/pullrequest/pullRequestComment').default as (
+  return require('../../src/pullrequest/pullRequestComment') as typeof import('../../src/pullrequest/pullRequestComment')
+}
+
+function loadModule() {
+  return loadCommentModule().default as (
     committerMap: any,
     committers: any
   ) => Promise<any>
@@ -312,6 +316,85 @@ describe('prCommentSetup', () => {
       'Could not retrieve or verify CLA bot comments'
     )
     await expect(attempt).rejects.not.toThrow('sensitive upstream response')
+    http.assertClean()
+  })
+
+  it('rejects a stale pending plan when another run updates the bot marker', async () => {
+    const initialComments = [
+      {
+        id: 777,
+        body: 'pending **CLA Assistant Lite bot** notice',
+        user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+        created_at: '2024-01-02T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z'
+      }
+    ]
+    const newerComments = [
+      {
+        ...initialComments[0],
+        body: 'all signed **CLA Assistant Lite bot** notice',
+        updated_at: '2024-01-02T00:01:00Z'
+      }
+    ]
+    canonicalBotInterceptor(http)
+    canonicalBotInterceptor(http)
+    listCommentsInterceptor(http, newerComments)
+    const captured = captureJson(
+      http.github(),
+      { path: '/repos/acme/widgets/issues/comments/777', method: 'PATCH' },
+      { status: 200, body: { id: 777 } }
+    )
+
+    const { preparePrComment } = loadCommentModule()
+    const plan = await preparePrComment(
+      {
+        signed: [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+        notSigned: [{ name: 'bob', id: 2, pullRequestNo: 42 }],
+        unknown: []
+      },
+      [
+        { name: 'alice', id: 1, pullRequestNo: 42 },
+        { name: 'bob', id: 2, pullRequestNo: 42 }
+      ],
+      initialComments
+    )
+
+    await expect(plan.apply()).rejects.toThrow(/stale.*bot comment|changed/i)
+    expect(captured.body).toBeUndefined()
+    http.assertClean()
+  })
+
+  it('rejects a stale create plan when another run creates the bot marker', async () => {
+    const currentComments = [
+      {
+        id: 778,
+        body: 'all signed **CLA Assistant Lite bot** notice',
+        user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+        created_at: '2024-01-02T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z'
+      }
+    ]
+    canonicalBotInterceptor(http)
+    listCommentsInterceptor(http, currentComments)
+    const captured = captureJson(
+      http.github(),
+      { path: '/repos/acme/widgets/issues/42/comments', method: 'POST' },
+      { status: 201, body: { id: 999 } }
+    )
+
+    const { preparePrComment } = loadCommentModule()
+    const plan = await preparePrComment(
+      {
+        signed: [],
+        notSigned: [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+        unknown: []
+      },
+      [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+      []
+    )
+
+    await expect(plan.apply()).rejects.toThrow(/stale.*bot comment|changed/i)
+    expect(captured.body).toBeUndefined()
     http.assertClean()
   })
 })
