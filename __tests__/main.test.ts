@@ -26,9 +26,11 @@ describe('Pull request event', () => {
     mockedCoreWarning.mockReset()
     mockedValidateMergedPullRequestForLock.mockReset()
     mockedValidateMergedPullRequestForLock.mockResolvedValue()
-    mockedCoreGetInput.mockImplementation((name: string) =>
-      name === 'lock-pullrequest-aftermerge' ? 'true' : ''
-    )
+    mockedCoreGetInput.mockImplementation((name: string) => {
+      if (name === 'lock-pullrequest-aftermerge') return 'true'
+      if (name === 'required-base-ref') return 'main'
+      return ''
+    })
     // @ts-ignore
     github.context = {
       eventName: 'pull_request_target',
@@ -151,6 +153,17 @@ describe('Pull request event', () => {
     github.context.payload.action = 'opened'
     await run()
     expect(mockedGetClas).toHaveBeenCalled()
+  })
+
+  test('warns when the required base branch is not configured', async () => {
+    mockedCoreGetInput.mockImplementation((name: string) =>
+      name === 'lock-pullrequest-aftermerge' ? 'true' : ''
+    )
+    github.context.payload.action = 'opened'
+    await run()
+    expect(mockedCoreWarning).toHaveBeenCalledWith(
+      expect.stringMatching(/required-base-ref.*not set.*any base branch/i)
+    )
   })
 
   test('the lockPullRequest  method should not be called if there is a pull request sync', async () => {

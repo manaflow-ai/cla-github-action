@@ -34,8 +34,9 @@ describe('lockPullRequest', () => {
     const { lockPullRequest } = loadModule()
     await lockPullRequest()
     http.assertClean()
-    // body is typically undefined/empty for the lock endpoint
-    expect(captured.rawBody === undefined || captured.rawBody === '').toBe(true)
+    expect(JSON.parse(captured.rawBody ?? '')).toEqual({
+      lock_reason: 'resolved'
+    })
   })
 
   it('fails closed when the lock endpoint returns an error', async () => {
