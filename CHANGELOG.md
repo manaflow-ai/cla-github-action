@@ -32,7 +32,8 @@ commit that introduced it.
   changed case or punctuation, quotations, and bot comments do not count.
 - Existing CLA marker comments are trusted only when GitHub confirms that the
   canonical Actions bot wrote them. A spoofed marker cannot suppress a valid
-  signing comment from the same action run.
+  signing comment from the same action run. The verified numeric bot ID comes
+  from the current GitHub instance, so GitHub Enterprise Server is supported.
 - The action checks the live Pull Request state, opener, base repository ID,
   base branch, head repository ID, head branch, and head commit before
   signature work, before a ledger write, and before it reports success.
@@ -79,6 +80,9 @@ commit that introduced it.
 - When the signature ledger does not exist, the first run creates an empty
   ledger and leaves existing declarations pending with `recheck` guidance. It
   never publishes all-signed status before those signatures are persisted.
+- If an authenticated allowlisted opener is the only contributor on the first
+  Pull Request, ledger creation completes successfully without requesting a
+  signature.
 
 ### Changed
 

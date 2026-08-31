@@ -51,12 +51,17 @@ export async function setupClaCheck() {
   )
   committers = checkAllowList(committers)
 
-  const { claFileContent, sha } = (await getCLAFileContentandSHA(
+  const claFile = await getCLAFileContentandSHA(
     committers,
     committerMap,
     livePullRequest,
     pullRequestComments
-  )) as ClafileContentAndSha
+  )
+  // A missing ledger was created and no contributor remains after the
+  // authenticated opener allowlist. The bootstrap path already published the
+  // all-signed status, so no ledger update is required.
+  if (!claFile) return
+  const { claFileContent, sha } = claFile
 
   committerMap = prepareCommiterMap(committers, claFileContent) as CommitterMap
   if (openerMismatch) {
@@ -233,15 +238,19 @@ async function createClaFileAndPRComment(
     Buffer.from(initialContentString).toString('base64')
 
   await validateLivePullRequest(livePullRequest)
-  await createFile(initialContentBinary).catch((error: unknown) =>
-    core.setFailed(
+  try {
+    await createFile(initialContentBinary)
+  } catch (error) {
+    throw new Error(
       `Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`
     )
-  )
+  }
+  await validateLivePullRequest(livePullRequest)
   // The first run creates an empty ledger. Keep existing declarations pending
   // until a later run can validate and persist them through the normal update
   // path. Never publish all-signed status for an empty new ledger.
   await prCommentSetup(committerMap, committers, pullRequestComments, false)
+  if (committers.length === 0) return
   throw new Error(
     `Committers of pull request ${context.issue.number} have to sign the CLA`
   )

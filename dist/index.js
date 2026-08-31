@@ -48894,10 +48894,6 @@ function escapeHtml(value) {
 
 
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
-// GitHub's Actions bot account has a stable numeric identity. Require the
-// login, type, and ID together so a compromised or unexpected API response
-// cannot authorize a public marker string as a trusted bot comment.
-const ACTIONS_BOT_ID = 41898282;
 async function prCommentSetup(committerMap, committers, preloadedComments, acceptSigningComments = true) {
     const plan = await preparePrComment(committerMap, committers, preloadedComments, acceptSigningComments);
     await plan.apply();
@@ -49000,10 +48996,11 @@ async function getComment(comments) {
         });
         if (canonicalBot.data.type !== 'Bot' ||
             canonicalBot.data.login.toLowerCase() !== ACTIONS_BOT_LOGIN ||
-            canonicalBot.data.id !== ACTIONS_BOT_ID) {
+            !Number.isSafeInteger(canonicalBot.data.id) ||
+            canonicalBot.data.id <= 0) {
             throw new Error('GitHub did not return the canonical Actions bot identity');
         }
-        const trusted = markerComments.find(comment => comment.user?.id === ACTIONS_BOT_ID &&
+        const trusted = markerComments.find(comment => comment.user?.id === canonicalBot.data.id &&
             comment.user.login.toLowerCase() ===
                 canonicalBot.data.login.toLowerCase() &&
             comment.user.type === canonicalBot.data.type);
@@ -49324,7 +49321,13 @@ async function setupClaCheck() {
     const openerMismatch = detectOpenerMismatch(commitAuthors, livePullRequest.opener);
     let committers = includePullRequestOpener(commitAuthors, livePullRequest.opener);
     committers = checkAllowList(committers);
-    const { claFileContent, sha } = (await getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments));
+    const claFile = await getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments);
+    // A missing ledger was created and no contributor remains after the
+    // authenticated opener allowlist. The bootstrap path already published the
+    // all-signed status, so no ledger update is required.
+    if (!claFile)
+        return;
+    const { claFileContent, sha } = claFile;
     committerMap = setupClaCheck_prepareCommiterMap(committers, claFileContent);
     if (openerMismatch) {
         committerMap.openerMismatch = openerMismatch;
@@ -49447,11 +49450,19 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
     const initialContentString = JSON.stringify(initialContent, null, 3);
     const initialContentBinary = Buffer.from(initialContentString).toString('base64');
     await validateLivePullRequest(livePullRequest);
-    await createFile(initialContentBinary).catch((error) => setFailed(`Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`));
+    try {
+        await createFile(initialContentBinary);
+    }
+    catch (error) {
+        throw new Error(`Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`);
+    }
+    await validateLivePullRequest(livePullRequest);
     // The first run creates an empty ledger. Keep existing declarations pending
     // until a later run can validate and persist them through the normal update
     // path. Never publish all-signed status for an empty new ledger.
     await prCommentSetup(committerMap, committers, pullRequestComments, false);
+    if (committers.length === 0)
+        return;
     throw new Error(`Committers of pull request ${github_context.issue.number} have to sign the CLA`);
 }
 function setupClaCheck_prepareCommiterMap(committers, claFileContent) {
