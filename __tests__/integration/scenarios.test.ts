@@ -800,6 +800,60 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('allows a maintainer cherry-pick only with the opener guard opt-out and a current committer signature', async () => {
+    const watch = watchCore()
+    setInput('require-opener-as-author', 'false')
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 26,
+      head: { sha: 'headsha', ref: 'maintainer/cherry-pick' },
+      user: { login: 'alice', id: 1001 },
+      commits: [
+        {
+          author: { login: 'bob', id: 2002 },
+          committer: { login: 'alice', id: 1001 }
+        }
+      ]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [
+        { name: 'alice', id: 1001 },
+        { name: 'bob', id: 2002 }
+      ]
+    })
+    fake.repo('acme', 'widgets').addComment(26, {
+      body: '**CLA Assistant Lite bot**: notice',
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
+    })
+    fake.repo('acme', 'widgets').addComment(26, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 26,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 26,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures).toEqual([])
+    expect(fake.repo('acme', 'widgets').listComments(26)[0]!.body).toMatch(
+      /all contributors have signed the cla/i
+    )
+    watch.restore()
+  })
+
   it('does not silently remove a GitHub Actions bot commit identity', async () => {
     const watch = watchCore()
     setInput('require-opener-as-author', 'false')
