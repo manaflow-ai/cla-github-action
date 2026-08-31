@@ -48,7 +48,7 @@ commit that introduced it.
 - A failed request to lock a merged Pull Request now fails the action instead
   of reporting success with an unlocked signature comment.
 - Pull Requests with more than 1,000 comments and signature ledgers with more
-  than 10,000 entries or 2 MiB fail closed.
+  than 10,000 entries or 1,000,000 bytes fail closed before a read or write.
 - A closed event is re-fetched and matched by repository IDs, refs, head SHA,
   opener, state, and merge result before the action locks the conversation.
 - The new `required-base-ref` input has an empty compatibility default, which

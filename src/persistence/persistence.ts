@@ -4,7 +4,7 @@ import { ClaFileContent, ReactedCommitterMap } from '../interfaces'
 import { Octokit, getDefaultOctokitClient, getPATOctokit } from '../octokit'
 
 import * as input from '../shared/getInputs'
-import { MAX_LEDGER_SIGNATURES } from '../shared/limits'
+import { MAX_LEDGER_BYTES, MAX_LEDGER_SIGNATURES } from '../shared/limits'
 
 interface SignaturesTarget {
   octokit: Octokit
@@ -63,9 +63,13 @@ export async function updateFile(
       ...reactedCommitters.newSigned
     ])
   }
-  const contentBinary = Buffer.from(JSON.stringify(updated, null, 2)).toString(
-    'base64'
-  )
+  const serialized = JSON.stringify(updated, null, 2)
+  if (Buffer.byteLength(serialized) > MAX_LEDGER_BYTES) {
+    throw new Error(
+      `Cannot persist a CLA signature ledger larger than ${MAX_LEDGER_BYTES} bytes`
+    )
+  }
+  const contentBinary = Buffer.from(serialized).toString('base64')
 
   await t.octokit.rest.repos.createOrUpdateFileContents({
     owner: t.owner,

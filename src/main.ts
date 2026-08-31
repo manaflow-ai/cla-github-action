@@ -10,17 +10,18 @@ export async function run() {
   try {
     core.info(`CLA Assistant GitHub Action bot has started the process`)
 
-    if (
-      context.payload.action === 'closed' &&
-      input.lockPullRequestAfterMerge()
-    ) {
-      if (context.payload.pull_request?.merged) {
+    if (context.payload.action === 'closed') {
+      if (
+        input.lockPullRequestAfterMerge() &&
+        context.payload.pull_request?.merged
+      ) {
         await validateMergedPullRequestForLock()
         return lockPullRequest()
       }
-      core.info(
-        `Pull request ${context.issue.number} was closed without merging, not locking it`
-      )
+      const reason = context.payload.pull_request?.merged
+        ? 'automatic locking is disabled'
+        : 'it was not merged'
+      core.info(`Pull request ${context.issue.number} is closed and ${reason}`)
       return
     }
 

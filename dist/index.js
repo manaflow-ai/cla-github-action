@@ -48429,7 +48429,8 @@ function actorsMatch(left, right) {
 /** Fail-closed bounds for data controlled by Pull Request contributors. */
 const MAX_PULL_REQUEST_COMMENTS = 1000;
 const MAX_LEDGER_SIGNATURES = 10_000;
-const MAX_LEDGER_BYTES = 2 * 1024 * 1024;
+// GitHub's Contents API only supports files up to 1 MB.
+const MAX_LEDGER_BYTES = 1_000_000;
 
 ;// CONCATENATED MODULE: ./src/persistence/persistence.ts
 
@@ -48476,7 +48477,11 @@ async function updateFile(sha, claFileContent, reactedCommitters) {
             ...reactedCommitters.newSigned
         ])
     };
-    const contentBinary = Buffer.from(JSON.stringify(updated, null, 2)).toString('base64');
+    const serialized = JSON.stringify(updated, null, 2);
+    if (Buffer.byteLength(serialized) > MAX_LEDGER_BYTES) {
+        throw new Error(`Cannot persist a CLA signature ledger larger than ${MAX_LEDGER_BYTES} bytes`);
+    }
+    const contentBinary = Buffer.from(serialized).toString('base64');
     await t.octokit.rest.repos.createOrUpdateFileContents({
         owner: t.owner,
         repo: t.repo,
@@ -49308,13 +49313,16 @@ async function lockPullRequest() {
 async function run() {
     try {
         info(`CLA Assistant GitHub Action bot has started the process`);
-        if (github_context.payload.action === 'closed' &&
-            lockPullRequestAfterMerge()) {
-            if (github_context.payload.pull_request?.merged) {
+        if (github_context.payload.action === 'closed') {
+            if (lockPullRequestAfterMerge() &&
+                github_context.payload.pull_request?.merged) {
                 await validateMergedPullRequestForLock();
                 return lockPullRequest();
             }
-            info(`Pull request ${github_context.issue.number} was closed without merging, not locking it`);
+            const reason = github_context.payload.pull_request?.merged
+                ? 'automatic locking is disabled'
+                : 'it was not merged';
+            info(`Pull request ${github_context.issue.number} is closed and ${reason}`);
             return;
         }
         if (github_context.payload.action === 'reopened' &&
