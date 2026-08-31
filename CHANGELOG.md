@@ -40,6 +40,9 @@ commit that introduced it.
 - The action checks the live Pull Request state, opener, base repository ID,
   base branch, head repository ID, head branch, and head commit before
   signature work, before a ledger write, and before it reports success.
+- GraphQL commit identity pages must report the same Pull Request head commit
+  as the live REST snapshot. A force-push cannot substitute an unbound commit
+  set between validation and signature work.
 - The signature ledger now rejects invalid entries and removes duplicate IDs.
 - The unsafe branch-based internal workflow rerun was removed. A repository
   must use a separate trusted rerun job that validates the Pull Request number

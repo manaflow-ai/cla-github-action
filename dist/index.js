@@ -48249,6 +48249,7 @@ const COMMITS_QUERY = `
 query($owner:String! $name:String! $number:Int! $cursor:String){
     repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
+            headRefOid
             commits(first: 100, after: $cursor) {
                 totalCount
                 edges {
@@ -48290,8 +48291,11 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
  * same account as the opener. Committer metadata does not qualify an opener
  * for the author/co-author guard.
  */
-async function getCommitters() {
+async function getCommitters(expectedHeadSha) {
     try {
+        if (!expectedHeadSha.trim()) {
+            throw new Error('The live Pull Request head commit is missing; refusing to query commit identities');
+        }
         const committers = new Map();
         const addActor = (actor, role) => {
             const roles = {
@@ -48336,7 +48340,14 @@ async function getCommitters() {
                 number: github_context.issue.number,
                 cursor
             }));
-            const page = response.repository.pullRequest.commits;
+            const pullRequest = response?.repository?.pullRequest;
+            if (!pullRequest ||
+                typeof pullRequest.headRefOid !== 'string' ||
+                pullRequest.headRefOid.length === 0 ||
+                pullRequest.headRefOid !== expectedHeadSha) {
+                throw new Error('GraphQL Pull Request head commit does not match the live Pull Request head; refusing to use unbound commit identities');
+            }
+            const page = pullRequest.commits;
             if (!Number.isSafeInteger(page.totalCount) ||
                 page.totalCount < 0 ||
                 page.totalCount > MAX_PULL_REQUEST_COMMITS) {
@@ -49326,7 +49337,7 @@ async function setupClaCheck() {
     // write, then use the same snapshot throughout this action run.
     const pullRequestComments = await listBoundedPullRequestComments();
     let committerMap = getInitialCommittersMap();
-    const commitAuthors = await getCommitters();
+    const commitAuthors = await getCommitters(livePullRequest.headSha);
     const openerMismatch = detectOpenerMismatch(commitAuthors, livePullRequest.opener);
     let committers = includePullRequestOpener(commitAuthors, livePullRequest.opener);
     committers = checkAllowList(committers);

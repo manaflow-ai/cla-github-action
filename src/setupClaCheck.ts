@@ -44,7 +44,7 @@ export async function setupClaCheck() {
   const pullRequestComments = await listBoundedPullRequestComments()
   let committerMap = getInitialCommittersMap()
 
-  const commitAuthors = await getCommitters()
+  const commitAuthors = await getCommitters(livePullRequest.headSha)
   const openerMismatch = detectOpenerMismatch(
     commitAuthors,
     livePullRequest.opener

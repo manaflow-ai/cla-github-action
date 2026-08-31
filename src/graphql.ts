@@ -33,6 +33,7 @@ interface GraphQLEdge {
 interface GraphQLResponse {
   repository: {
     pullRequest: {
+      headRefOid: string | null
       commits: {
         totalCount: number
         edges: GraphQLEdge[]
@@ -54,6 +55,7 @@ const COMMITS_QUERY = `
 query($owner:String! $name:String! $number:Int! $cursor:String){
     repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
+            headRefOid
             commits(first: 100, after: $cursor) {
                 totalCount
                 edges {
@@ -96,8 +98,15 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
  * same account as the opener. Committer metadata does not qualify an opener
  * for the author/co-author guard.
  */
-export default async function getCommitters(): Promise<Committer[]> {
+export default async function getCommitters(
+  expectedHeadSha: string
+): Promise<Committer[]> {
   try {
+    if (!expectedHeadSha.trim()) {
+      throw new Error(
+        'The live Pull Request head commit is missing; refusing to query commit identities'
+      )
+    }
     const committers = new Map<string, Committer>()
 
     const addActor = (
@@ -151,7 +160,18 @@ export default async function getCommitters(): Promise<Committer[]> {
         cursor
       })) as GraphQLResponse
 
-      const page = response.repository.pullRequest.commits
+      const pullRequest = response?.repository?.pullRequest
+      if (
+        !pullRequest ||
+        typeof pullRequest.headRefOid !== 'string' ||
+        pullRequest.headRefOid.length === 0 ||
+        pullRequest.headRefOid !== expectedHeadSha
+      ) {
+        throw new Error(
+          'GraphQL Pull Request head commit does not match the live Pull Request head; refusing to use unbound commit identities'
+        )
+      }
+      const page = pullRequest.commits
       if (
         !Number.isSafeInteger(page.totalCount) ||
         page.totalCount < 0 ||
