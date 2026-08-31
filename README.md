@@ -78,6 +78,10 @@ jobs:
     name: "CLA Assistant v2"
     needs: CLACommentGate
     if: always() && needs.CLACommentGate.result == 'success'
+    outputs:
+      # A trusted same-workflow rerun job may consume this only after it also
+      # binds the current Pull Request, head SHA, base branch, and workflow.
+      signature_recorded: ${{ steps.cla_action.outputs.signature_recorded }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -99,8 +103,9 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: "CLA Assistant v2"
+        id: cla_action
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@91ce707cb678fe377c6788ecbf8470fa6205a969
+        uses: manaflow-ai/cla-github-action@fc608ba7106e7029d981d487d7bad28a64325956
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only set this token for a remote signature repository. Prefer a
@@ -145,7 +150,7 @@ This version accepts signing and `recheck` only on newly created comments. A dec
 
 The sample lets any authenticated human Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch. The signer sample remains advisory until that worker is installed.
 
-The action exposes `signature_recorded=true` only after it persists a new signature. A separate rerun worker may use that output to refresh the exact failed check for the same Pull Request. Do not authorize a rerun from an arbitrary signing comment when this output is false.
+The action exposes `signature_recorded=true` only after it persists a new signature. The sample gives the action step an ID and publishes this as `needs.CLAAssistant.outputs.signature_recorded` for a trusted later job in the same workflow. That rerun job may use the output only after it binds the exact failed check to the current Pull Request number, head SHA, base branch, and workflow. A separate workflow cannot consume a job output directly and needs an authenticated handoff. Do not authorize a rerun from an arbitrary signing comment when this output is false.
 
 The action publishes an all-signed bot comment only after it revalidates the signing comments and persists any new signatures. If a signer edits or deletes the declaration during the run, the ledger and the previous trusted bot status stay unchanged.
 
