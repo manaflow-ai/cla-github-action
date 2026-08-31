@@ -94,23 +94,21 @@ describe('CLA action end-to-end scenarios', () => {
     // Existing bot comment + the user's signing comment.
     fake.repo('acme', 'widgets').addComment(7, {
       body: 'something **CLA Assistant Lite bot** says',
-      user: { login: 'github-actions[bot]', id: 41898282 }
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
     })
     fake.repo('acme', 'widgets').addComment(7, {
       body: 'I have read the CLA Document and I hereby sign the CLA',
       user: { login: 'alice', id: 1001 }
     })
-    fake
-      .repo('acme', 'widgets')
-      .addWorkflow('cla-check', [
-        {
-          id: 777,
-          conclusion: 'failure',
-          head_sha: 'headsha',
-          event: 'pull_request_target',
-          pull_requests: [{ number: 7 }]
-        }
-      ])
+    fake.repo('acme', 'widgets').addWorkflow('cla-check', [
+      {
+        id: 777,
+        conclusion: 'failure',
+        head_sha: 'headsha',
+        event: 'pull_request_target',
+        pull_requests: [{ number: 7 }]
+      }
+    ])
 
     setContext({
       owner: 'acme',
@@ -775,6 +773,59 @@ describe('CLA action end-to-end scenarios', () => {
 
     expect(watch.failures.join('\n')).toMatch(/more than 100 authors/i)
     expect(fake.repo('acme', 'widgets').listComments(20)).toHaveLength(0)
+    watch.restore()
+  })
+
+  it('does not write a signature after the live PR is retargeted away from main', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 23,
+      head: { sha: 'headsha', ref: 'feature/retargeted' },
+      base: { ref: 'release', repoFullName: 'acme/widgets' },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake
+      .repo('acme', 'widgets')
+      .setFile('signatures/cla.json', { signedContributors: [] })
+    fake.repo('acme', 'widgets').addComment(23, {
+      body: '**CLA Assistant Lite bot**: notice',
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
+    })
+    fake.repo('acme', 'widgets').addComment(23, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 23,
+      actor: 'alice',
+      eventName: 'issue_comment',
+      payload: {
+        action: 'created',
+        issue: {
+          number: 23,
+          state: 'open',
+          pull_request: {}
+        },
+        comment: {
+          body: 'I have read the CLA Document and I hereby sign the CLA',
+          user: { login: 'alice', id: 1001, type: 'User' }
+        },
+        repository: {
+          id: fake.repo('acme', 'widgets').state.id,
+          full_name: 'acme/widgets'
+        }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/base branch.*main/i)
+    const ledger = fake
+      .repo('acme', 'widgets')
+      .getFile('signatures/cla.json') as any
+    expect(ledger.signedContributors).toEqual([])
     watch.restore()
   })
 })

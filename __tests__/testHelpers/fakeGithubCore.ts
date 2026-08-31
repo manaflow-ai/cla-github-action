@@ -27,6 +27,7 @@ export interface GitActorFixture {
 export interface PullRequest {
   number: number
   head: { sha: string; ref: string }
+  base?: { ref: string; repoFullName: string }
   merged?: boolean
   state?: 'open' | 'closed'
   commits: Array<{
@@ -266,6 +267,10 @@ export function createFakeGitHubCore(): FakeGitHubCore {
     return json(200, {
       number: pr.number,
       head: pr.head,
+      base: {
+        ref: pr.base?.ref || 'main',
+        repo: { full_name: pr.base?.repoFullName || `${owner}/${name}` }
+      },
       merged: !!pr.merged,
       state: pr.state || 'open'
     })
@@ -461,7 +466,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
               endCursor: c.authorsHasNextPage ? 'author-cursor' : null,
               hasNextPage: !!c.authorsHasNextPage
             }
-          },
+          }
         }
       },
       cursor: 'c1'
