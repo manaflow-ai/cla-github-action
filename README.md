@@ -86,7 +86,7 @@ jobs:
     steps:
       - name: "CLA Assistant v2"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@0c62b450dc02c9d71c407bcd354b7f9befe919cf
+        uses: manaflow-ai/cla-github-action@056a0e9d7237954489ab474f24e66c2e742e78f9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only set this token for a remote signature repository. Prefer a
@@ -123,9 +123,11 @@ Replace `<REPLACE_WITH_CLA_URL>` with the non-empty absolute HTTPS URL of the CL
 
 The `CLACommentGate` job has no write permission and no concurrency group. Its `if` guard filters most comments, but GitHub expression equality is case-insensitive. The shell step supplies the required case-sensitive comparison. The privileged `CLAAssistant` job enters its concurrency group only after this gate succeeds. If you set `custom-pr-sign-comment`, replace the default declaration in the gate `if` guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the signer job to run for every issue comment.
 
+GitHub workflow event admission cannot compare a comment body case-sensitively. The unprivileged gate must start a runner to reject a case variant, but it has no concurrency group and cannot replace valid pending signer work. A high-volume public repository can still spend runner resources on these gate jobs. Use a trusted webhook or GitHub App classifier, or an external rate limit, when that denial-of-service risk is material.
+
 The shell step and the action compare the raw comment body and do not trim whitespace. Contributors must post the declaration with no leading or trailing whitespace for it to count as an electronic signature. Keep the `pull_request_target.branches` filter and `required-base-ref` input set to the same protected branch. The event filter avoids unnecessary runs; the action input revalidates the live base branch before a write or lock.
 
-This version accepts signing and `recheck` only on newly created comments. It rejects `issue_comment` `edited` events. Do not add an `edited` trigger unless a later action version validates the edited event and the exact updated declaration at runtime.
+This version accepts signing and `recheck` only on newly created comments. A declaration comment must have matching GitHub creation and update timestamps. A comment edited into the declaration stays invalid on a later `recheck`. The workflow rejects `issue_comment` `edited` events. Do not add an `edited` trigger unless a later action version validates the edited event and the exact updated declaration at runtime.
 
 The sample lets any Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch.
 
@@ -169,7 +171,7 @@ The action re-fetches accepted signing comments immediately before a ledger writ
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: manaflow-ai/cla-github-action@0c62b450dc02c9d71c407bcd354b7f9befe919cf
+> uses: manaflow-ai/cla-github-action@056a0e9d7237954489ab474f24e66c2e742e78f9
 > ```
 >
 > Tools like [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
