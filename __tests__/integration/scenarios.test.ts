@@ -1072,6 +1072,91 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('fails closed when a pull request reports more than 1000 commits', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 32,
+      reportedCommitTotalCount: 1001,
+      head: { sha: 'headsha', ref: 'feature/too-many-commits' },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: []
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 32,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 32,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/more than 1000 commits/i)
+    expect(fake.repo('acme', 'widgets').listComments(32)).toHaveLength(0)
+    watch.restore()
+  })
+
+  it('fails closed when a pull request reports more than 1000 git identity assertions', async () => {
+    const watch = watchCore()
+    const commits = Array.from({ length: 11 }, (_, commitIndex) => ({
+      author: {
+        login: `author-${commitIndex}`,
+        id: 100_000 + commitIndex
+      },
+      committer: {
+        login: `committer-${commitIndex}`,
+        id: 200_000 + commitIndex
+      },
+      coAuthors: Array.from({ length: 98 }, (_, authorIndex) => ({
+        login: `coauthor-${commitIndex}-${authorIndex}`,
+        id: 300_000 + commitIndex * 100 + authorIndex
+      }))
+    }))
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 33,
+      head: { sha: 'headsha', ref: 'feature/too-many-identities' },
+      commits
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: []
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 33,
+      actor: 'author-0',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 33,
+          state: 'open',
+          user: { login: 'author-0', id: 100_000 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /more than 1000 git identity assertions/i
+    )
+    expect(fake.repo('acme', 'widgets').listComments(33)).toHaveLength(0)
+    watch.restore()
+  })
+
   it('does not write a signature after the live PR is retargeted away from main', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({

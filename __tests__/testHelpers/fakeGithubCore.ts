@@ -26,6 +26,8 @@ export interface GitActorFixture {
 
 export interface PullRequest {
   number: number
+  /** Test-only GraphQL totalCount override for fail-closed limit coverage. */
+  reportedCommitTotalCount?: number
   head: {
     sha: string
     ref: string
@@ -503,7 +505,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
         repository: {
           pullRequest: {
             commits: {
-              totalCount: edges.length,
+              totalCount: pr.reportedCommitTotalCount ?? edges.length,
               edges,
               pageInfo: { endCursor: 'c1', hasNextPage: false }
             }

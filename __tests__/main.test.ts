@@ -81,11 +81,11 @@ describe('Pull request event', () => {
     expect(mockedGetClas).not.toHaveBeenCalled()
   })
 
-  test('the unlockPullRequest method should be called if a locked pull request is reopened', async () => {
+  test('the unlockPullRequest method should not remove a maintainer lock from a reopened pull request', async () => {
     github.context.payload.action = 'reopened'
     github.context.payload.pull_request!.locked = true
     await run()
-    expect(mockedUnlockPullRequest).toHaveBeenCalled()
+    expect(mockedUnlockPullRequest).not.toHaveBeenCalled()
     expect(mockedGetClas).toHaveBeenCalled()
   })
 
