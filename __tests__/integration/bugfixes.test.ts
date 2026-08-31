@@ -85,6 +85,45 @@ describe('bug fixes', () => {
       watch.restore()
     })
 
+    it('shows the opener guard on the first run when the ledger is missing', async () => {
+      const watch = watchCore()
+      const repository = fake.repo('acme', 'widgets')
+      repository.addPullRequest({
+        number: 8,
+        head: { sha: 'headsha', ref: 'feature/bootstrap-opener-guard' },
+        user: { login: 'alice', id: 1001 },
+        commits: [{ author: { login: 'bob', id: 2002 } }]
+      })
+
+      setContext({
+        owner: 'acme',
+        repo: 'widgets',
+        issueNumber: 8,
+        actor: 'alice',
+        eventName: 'pull_request_target',
+        payload: {
+          pull_request: {
+            number: 8,
+            state: 'open',
+            user: { login: 'alice', id: 1001 }
+          },
+          repository: { id: repository.state.id },
+          action: 'opened'
+        }
+      })
+
+      await runAction()
+
+      const body = repository.listComments(8)[0]!.body
+      expect(body).toContain('[!CAUTION]')
+      expect(body).toContain('@alice')
+      expect(body).toContain('<code>bob</code>')
+      expect(watch.failures.join('\n')).toMatch(
+        /Pull Request opener @alice is not recorded/
+      )
+      watch.restore()
+    })
+
     it('keeps a first-run signing comment pending until the empty ledger exists', async () => {
       const watch = watchCore()
       const repository = fake.repo('acme', 'widgets')
