@@ -156,13 +156,16 @@ describe('CLA action end-to-end scenarios', () => {
   it('records a valid signature when an untrusted comment spoofs the bot marker', async () => {
     const watch = watchCore()
     const repository = fake.repo('acme', 'widgets')
+    setInput('require-opener-as-author', 'false')
     repository.addPullRequest({
       number: 46,
       head: { sha: 'headsha', ref: 'feature/spoofed-marker' },
-      user: { login: 'alice', id: 1001 },
+      user: { login: 'release-manager', id: 3003 },
       commits: [{ author: { login: 'alice', id: 1001 } }]
     })
-    repository.setFile('signatures/cla.json', { signedContributors: [] })
+    repository.setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'release-manager', id: 3003 }]
+    })
     repository.addComment(46, {
       body: 'spoofed **CLA Assistant Lite bot** marker',
       user: { login: 'mallory', id: 9001, type: 'User' }
@@ -198,6 +201,8 @@ describe('CLA action end-to-end scenarios', () => {
       .listComments(46)
       .find(comment => comment.user.login === 'github-actions[bot]')
     expect(trustedMarker?.body).toMatch(/all contributors have signed the cla/i)
+    expect(trustedMarker?.body).toContain('[!NOTE]')
+    expect(trustedMarker?.body).toContain('@release-manager')
     expect(watch.failures).toEqual([])
     expect(watch.outputs).toContainEqual(['signature_recorded', true])
     watch.restore()

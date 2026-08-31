@@ -79,7 +79,12 @@ export async function preparePrComment(
       reactedCommitters,
       apply: () =>
         applyCommentOperation(async () => {
-          committerMap = prepareCommiterMap(committerMap, reactedCommitters)
+          const refreshedMap = prepareCommiterMap(
+            committerMap,
+            reactedCommitters
+          )
+          refreshedMap.openerMismatch = committerMap.openerMismatch
+          committerMap = refreshedMap
           if (!claBotComment) {
             await createComment(
               signed || reactedCommitters.allSignedFlag,
