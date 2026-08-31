@@ -27,6 +27,7 @@ describe('commentContainsSignature', () => {
     ['appended recheck', `${CLA}\nrecheck`],
     ['prepended greeting', `Hi,\n\n${CLA}`],
     ['appended qualification', `${CLA}\nfor this change only`],
+    ['edited after signing', `${CLA}\nI withdraw this declaration`],
     ['phrase inside a markdown blockquote', `> ${CLA}`],
     ['phrase after a markdown blockquote', `> context\n${CLA}`],
     ['near-miss wording', 'I have read the CLA and I sign it']
@@ -59,8 +60,9 @@ describe('isCommentSignedByUser', () => {
     expect(isCommentSignedByUser(CLA, 'github-actions[bot]', 'Bot')).toBe(false)
   })
 
-  it('does not reject a human account based only on its login spelling', () => {
-    expect(isCommentSignedByUser(CLA, 'example[bot]', 'User')).toBe(true)
+  it('rejects a bot-suffixed login even when actor type is missing or wrong', () => {
+    expect(isCommentSignedByUser(CLA, 'example[bot]')).toBe(false)
+    expect(isCommentSignedByUser(CLA, 'example[bot]', 'User')).toBe(false)
   })
 
   it('uses the CLA phrase by default', () => {

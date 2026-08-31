@@ -180,7 +180,7 @@ describe('error paths', () => {
     watch.restore()
   })
 
-  it('swallows a rerun-workflow failure as a warning rather than failing the whole action', async () => {
+  it('does not call the Actions rerun API after a comment signature', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
@@ -195,14 +195,15 @@ describe('error paths', () => {
       user: { login: 'github-actions[bot]', id: 41898282 }
     })
     fake.repo('acme', 'widgets').addComment(7, {
-      body: 'i have read the cla document and i hereby sign the cla',
-      user: { login: 'alice', id: 1001 }
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
     })
     fake
       .repo('acme', 'widgets')
       .addWorkflow('cla-check', [{ id: 777, conclusion: 'failure' }])
 
-    // Rerun-workflow-run fails at the 'listWorkflowRuns' step.
+    // Any attempt to inspect a workflow run fails. The hardened action must
+    // not touch this endpoint because reruns belong in a separate trusted job.
     fake.injectFailure({
       method: 'GET',
       pathPattern: /\/repos\/acme\/widgets\/actions\/workflows\/\d+\/runs/,
@@ -238,9 +239,43 @@ describe('error paths', () => {
     }
     expect(sigFile.signedContributors.map(c => c.name)).toContain('alice')
 
-    // The rerun failure should be logged as a warning, not a hard failure.
-    expect(watch.warnings.join('\n')).toMatch(/rerun of prior workflow failed/i)
+    expect(fake.recordedRerunRequests).toEqual([])
+    expect(watch.warnings.join('\n')).not.toMatch(/rerun/i)
     expect(watch.failures).toEqual([])
+    watch.restore()
+  })
+
+  it('fails closed with a clear error when the signature ledger shape is invalid', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 22,
+      head: { sha: 'headsha', ref: 'feature/invalid-ledger' },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
+      signedContributors: 'everyone'
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 22,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 22,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/invalid cla signature ledger/i)
+    expect(fake.repo('acme', 'widgets').listComments(22)).toHaveLength(0)
     watch.restore()
   })
 })

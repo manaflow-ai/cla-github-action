@@ -170,5 +170,38 @@ describe('persistence', () => {
 
       expect(captured.body.message).toBe('alice signed CLA on acme/widgets#42')
     })
+
+    it('deduplicates stored and newly observed signatures by verified user ID', async () => {
+      const captured = captureJson(
+        http.github(),
+        {
+          path: '/repos/acme/widgets/contents/signatures%2Fv1%2Fcla.json',
+          method: 'PUT'
+        },
+        { status: 200, body: { content: { sha: 'new' } } }
+      )
+
+      const { updateFile } = loadPersistence()
+      await updateFile(
+        'oldsha',
+        { signedContributors: [{ name: 'alice', id: 1 }] },
+        {
+          newSigned: [
+            { name: 'alice-renamed', id: 1 },
+            { name: 'bob', id: 2 },
+            { name: 'bob-again', id: 2 }
+          ],
+          allSignedFlag: true
+        } as any
+      )
+
+      const decoded = JSON.parse(
+        Buffer.from(captured.body.content, 'base64').toString()
+      )
+      expect(decoded.signedContributors).toEqual([
+        { name: 'alice', id: 1 },
+        { name: 'bob', id: 2 }
+      ])
+    })
   })
 })
