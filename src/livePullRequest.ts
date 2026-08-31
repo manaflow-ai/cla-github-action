@@ -44,6 +44,11 @@ export async function validateLivePullRequest(
   const requiredBaseRef = getRequiredBaseRef()
   const opener = pullRequest.user
 
+  if (pullRequest.number !== context.issue.number) {
+    throw new Error(
+      'Live Pull Request number does not match the event; refusing a CLA signature write'
+    )
+  }
   if (pullRequest.state !== 'open') {
     throw new Error(
       'Live Pull Request is not open; refusing a CLA signature write'

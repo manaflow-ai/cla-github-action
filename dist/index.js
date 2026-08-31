@@ -49067,6 +49067,9 @@ async function validateLivePullRequest(expected) {
     const liveHeadRepositoryId = pullRequest.head.repo?.id;
     const requiredBaseRef = getRequiredBaseRef();
     const opener = pullRequest.user;
+    if (pullRequest.number !== github_context.issue.number) {
+        throw new Error('Live Pull Request number does not match the event; refusing a CLA signature write');
+    }
     if (pullRequest.state !== 'open') {
         throw new Error('Live Pull Request is not open; refusing a CLA signature write');
     }
