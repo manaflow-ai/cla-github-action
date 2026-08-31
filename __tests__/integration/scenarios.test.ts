@@ -280,6 +280,61 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('does not reuse a prior signature for a forged non-opener primary author', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 30,
+      head: { sha: 'headsha', ref: 'feature/forged-primary-author' },
+      user: { login: 'alice', id: 1001 },
+      commits: [
+        {
+          author: { login: 'bob', id: 2002 },
+          coAuthors: [{ login: 'alice', id: 1001 }]
+        }
+      ]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [
+        { name: 'alice', id: 1001 },
+        { name: 'bob', id: 2002 }
+      ]
+    })
+    fake.repo('acme', 'widgets').addComment(30, {
+      body: '**CLA Assistant Lite bot**: notice',
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
+    })
+    fake.repo('acme', 'widgets').addComment(30, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 30,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 30,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /Committers of Pull Request number 30/
+    )
+    expect(fake.repo('acme', 'widgets').listComments(30)[0]!.body).toContain(
+      ':x: @bob'
+    )
+    watch.restore()
+  })
+
   it('Merged PR: lock endpoint is called when lock-pullrequest-aftermerge is true', async () => {
     setInput('lock-pullrequest-aftermerge', 'true')
 
