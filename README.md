@@ -110,6 +110,8 @@ The shell step compares the raw comment body and does not trim whitespace. Contr
 
 The sample lets any Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch.
 
+The action exposes `signature_recorded=true` only after it persists a new signature. A separate rerun worker may use that output to refresh the exact failed check for the same Pull Request. Do not authorize a rerun from an arbitrary signing comment when this output is false.
+
 > [!IMPORTANT]
 > **Pinning by commit SHA**
 >

@@ -57,6 +57,11 @@ inputs:
       style contribution workflows).
     default: "true"
 outputs:
+  signature_recorded:
+    description: >
+      Set to 'true' only when this run accepted a new Pull Request signing
+      comment and persisted that signature in the ledger. Consumers can use
+      this output to authorize a narrowly scoped post-signature check refresh.
   opener_not_in_commits:
     description: >
       Set to 'true' when the Pull Request opener is not recorded as an author

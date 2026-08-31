@@ -49124,6 +49124,9 @@ function validatePayloadAgainstLive(live, repository) {
 
 
 async function setupClaCheck() {
+    // A caller may use this output to authorize a follow-up check refresh. Keep
+    // it false unless this run actually persists a newly accepted signature.
+    setOutput('signature_recorded', false);
     const livePullRequest = await validateLivePullRequest();
     // Bound all contributor-controlled comments before any ledger or comment
     // write, then use the same snapshot throughout this action run.
@@ -49144,6 +49147,7 @@ async function setupClaCheck() {
             /* pushing the recently signed  contributors to the CLA Json File */
             await validateLivePullRequest(livePullRequest);
             await updateFile(sha, claFileContent, reactedCommitters);
+            setOutput('signature_recorded', true);
         }
         if (reactedCommitters?.allSignedFlag ||
             committerMap?.notSigned === undefined ||

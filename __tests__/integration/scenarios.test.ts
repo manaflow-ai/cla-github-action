@@ -16,6 +16,7 @@ async function runAction() {
 function watchCore() {
   const failed = jest.spyOn(core, 'setFailed').mockImplementation(() => {})
   const info = jest.spyOn(core, 'info').mockImplementation(() => {})
+  const output = jest.spyOn(core, 'setOutput').mockImplementation(() => {})
   return {
     get failures() {
       return failed.mock.calls.map(c => String(c[0]))
@@ -23,9 +24,13 @@ function watchCore() {
     get infos() {
       return info.mock.calls.map(c => String(c[0]))
     },
+    get outputs() {
+      return output.mock.calls.map(c => [c[0], c[1]])
+    },
     restore() {
       failed.mockRestore()
       info.mockRestore()
+      output.mockRestore()
     }
   }
 }
@@ -83,6 +88,7 @@ describe('CLA action end-to-end scenarios', () => {
   })
 
   it('Contributor posts the sign phrase: signatures file updated, bot comment marks all signed', async () => {
+    const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
       head: { sha: 'headsha', ref: 'feature/cla' },
@@ -143,6 +149,8 @@ describe('CLA action end-to-end scenarios', () => {
     expect(bot.body).toMatch(/all contributors have signed the cla/i)
 
     expect(fake.recordedRerunRequests).toEqual([])
+    expect(watch.outputs).toContainEqual(['signature_recorded', true])
+    watch.restore()
   })
 
   it('Already-signed contributor opens a PR with no prior bot comment: posts an all-signed comment, file untouched', async () => {

@@ -149,6 +149,26 @@ describe('commentContent (CLA mode)', () => {
       expect(body).not.toContain('<script>alert(1)</script>')
       expect(body).not.toContain(':x: @Mallory')
     })
+
+    it('removes invisible Unicode formatting controls from inert identities', () => {
+      const body = commentContent(
+        false,
+        committerMap({
+          unknown: [
+            {
+              name: 'Mallory\u202e\u200balert',
+              id: 0,
+              pullRequestNo: 7,
+              email: 'evil@example.com'
+            }
+          ]
+        })
+      )
+
+      expect(body).toContain('<code>Mallory alert</code>')
+      expect(body).not.toContain('\u202e')
+      expect(body).not.toContain('\u200b')
+    })
   })
 
   describe('opener-mismatch block', () => {
