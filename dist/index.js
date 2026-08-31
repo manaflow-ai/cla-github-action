@@ -49300,7 +49300,8 @@ async function lockPullRequest() {
         await octokit.rest.issues.lock({
             owner: github_context.repo.owner,
             repo: github_context.repo.repo,
-            issue_number: pullRequestNo
+            issue_number: pullRequestNo,
+            lock_reason: 'resolved'
         });
         info(`Locked pull request ${pullRequestNo} to safeguard CLA signatures`);
     }
@@ -49319,6 +49320,9 @@ async function lockPullRequest() {
 async function run() {
     try {
         info(`CLA Assistant GitHub Action bot has started the process`);
+        if (!getRequiredBaseRef()) {
+            warning(`The 'required-base-ref' input is not set. The action accepts Pull Requests against any base branch. Set it explicitly for protected use.`);
+        }
         if (github_context.payload.action === 'closed') {
             if (lockPullRequestAfterMerge() &&
                 github_context.payload.pull_request?.merged) {

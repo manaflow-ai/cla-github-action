@@ -10,6 +10,12 @@ export async function run() {
   try {
     core.info(`CLA Assistant GitHub Action bot has started the process`)
 
+    if (!input.getRequiredBaseRef()) {
+      core.warning(
+        `The 'required-base-ref' input is not set. The action accepts Pull Requests against any base branch. Set it explicitly for protected use.`
+      )
+    }
+
     if (context.payload.action === 'closed') {
       if (
         input.lockPullRequestAfterMerge() &&

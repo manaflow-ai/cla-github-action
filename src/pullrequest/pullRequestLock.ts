@@ -9,7 +9,8 @@ export async function lockPullRequest() {
     await octokit.rest.issues.lock({
       owner: context.repo.owner,
       repo: context.repo.repo,
-      issue_number: pullRequestNo
+      issue_number: pullRequestNo,
+      lock_reason: 'resolved'
     })
     core.info(
       `Locked pull request ${pullRequestNo} to safeguard CLA signatures`

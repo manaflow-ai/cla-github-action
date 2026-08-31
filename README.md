@@ -33,7 +33,7 @@ on:
   issue_comment:
     types: [created]
   pull_request_target:
-    types: [opened,closed,edited,reopened,synchronize]
+    types: [opened,closed,reopened,synchronize]
 
 permissions: {}
 
@@ -84,6 +84,8 @@ jobs:
 
 The job `if` guard must use the same exact signing declaration as the action. If you set `custom-pr-sign-comment`, replace the default CLA declaration in the guard with that custom text. If you set `use-dco-flag: true`, replace it with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the guard to run privileged code for every issue comment.
 
+The sample lets any Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch.
+
 > [!IMPORTANT]
 > **Pinning by commit SHA**
 >
@@ -129,12 +131,12 @@ The job `if` guard must use the same exact signing declaration as the action. If
 
 #### 2. Pull Request event triggers CLA Workflow
 
-CLA action workflow will be triggered on all Pull Request `opened, closed, edited, reopened, synchronize` events. This workflow will always run in the base repository and that's why we are making use of the [pull_request_target](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request_target) event. The action validates the live Pull Request state, opener, base repository ID, base branch, head repository ID, head branch, and head commit before it writes signature data.
+CLA action workflow will be triggered on Pull Request `opened, closed, reopened, synchronize` events. This workflow will always run in the base repository and that's why we are making use of the [pull_request_target](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request_target) event. The action validates the live Pull Request state, opener, base repository ID, base branch, head repository ID, head branch, and head commit before it writes signature data.
 
 The action fails closed for every unlinked committer, including metadata that claims to be `GitHub <noreply@github.com>` or `web-flow`. Git names and email addresses are not authenticated and can be forged. `allowlist-ids` cannot match an unresolved identity.
 
 GitHub can map an author, co-author, or committer email to an account ID, but this mapping does not authenticate authorship. Every non-opener identity from git metadata must post the exact declaration on the current Pull Request. A stored signature is reusable only for the account authenticated by the live Pull Request API as the opener. A committer-only match does not satisfy the opener author/co-author guard.
-<br/> When the CLA workflow is triggered on pull request `closed` event and the Pull Request was merged, it will lock the Pull Request conversation so that the contributors cannot modify or delete the signatures (Pull Request comment) later. This feature is optional. A failed lock request fails the action. The action never removes a conversation lock. A maintainer must unlock a reopened Pull Request before contributors can sign.
+<br/> When the CLA workflow is triggered on pull request `closed` event and the Pull Request was merged, it will lock the Pull Request conversation with GitHub's `resolved` reason so that the contributors cannot modify or delete the signatures (Pull Request comment) later. This feature is optional. A failed lock request fails the action. The action never removes a conversation lock. A maintainer must unlock a reopened Pull Request before contributors can sign.
 
 The action fails closed when a Pull Request has more than 1,000 commits, more than 1,000 git identity assertions, or more than 1,000 comments. A signature ledger also fails closed above 10,000 entries or 1,000,000 bytes. The byte limit matches the GitHub Contents API limit and applies before reads and writes. These limits bound work on untrusted Pull Request and ledger data. Split a larger contribution or start a new versioned ledger before running the CLA check.
 
@@ -202,7 +204,7 @@ This PAT should have repo scope and is only required if you have configured to s
 | `path-to-document`     | _required_ |  provide full URL `https://<clafile>` to the document which shall be signed by the contributor(s)  It can be any file e.g. inside the repository or it can be a gist. | https://github.com/cla-assistant/github-action/blob/master/SAPCLA.md |
 | `path-to-signatures`       | _optional_ |  Path to the JSON file where  all the signatures of the contributors will be stored inside the repository. | signatures/version1/cla.json |
 | `branch`   | _optional_ |  Branch in which all the signatures of the contributors will be stored and Default branch is `master`.  | master |
-| `required-base-ref`   | _optional_ | Only a Pull Request with this live base branch can write signature data or be locked after merge. The compatibility default is empty, which does not restrict the base branch. Set this input explicitly for protected use. | main |
+| `required-base-ref`   | _optional_ | Only a Pull Request with this live base branch can write signature data or be locked after merge. The compatibility default is empty, which accepts any base branch and emits a runtime warning. Set this input explicitly for protected use. | main |
 | `allowlist-ids`   | _optional_ | Comma-separated numeric GitHub user IDs. Only the authenticated live Pull Request opener can be exempt. Commit-derived identities are never exempt. | 49699333,29139614 |
 | `allowlist`   | _deprecated_ | Ignored. Raw names, emails, and globs are unsafe identity evidence. | |
 | `remote-repository-name`   | _optional_ | provide the remote repository name where all the signatures should be stored . | remote repository name |
