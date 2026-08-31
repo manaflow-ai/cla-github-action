@@ -34,17 +34,22 @@ on:
     types: [created]
   pull_request_target:
     branches: [main]
-    types: [opened,closed,reopened,synchronize]
+    types: [opened,edited,closed,reopened,synchronize]
 
 permissions: {}
 
 jobs:
   CLACommentGate:
     if: >-
-      github.event_name == 'issue_comment' &&
+      (github.event_name == 'pull_request_target' &&
+      (github.event.action == 'opened' || github.event.action == 'edited' ||
+      github.event.action == 'closed' || github.event.action == 'reopened' ||
+      github.event.action == 'synchronize')) ||
+      (github.event_name == 'issue_comment' &&
+      github.event.action == 'created' &&
       github.event.issue.state == 'open' && github.event.issue.pull_request &&
       (github.event.comment.body == 'recheck' ||
-      github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA')
+      github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
     name: "CLA Comment Gate"
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -54,6 +59,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: "Validate exact CLA comment"
+        if: github.event_name == 'issue_comment'
         shell: bash
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
@@ -67,19 +73,15 @@ jobs:
   CLAAssistant:
     name: "CLA Assistant v2"
     needs: CLACommentGate
-    if: >-
-      always() &&
-      ((github.event_name == 'pull_request_target') ||
-      (github.event_name == 'issue_comment' &&
-      needs.CLACommentGate.result == 'success'))
+    if: always() && needs.CLACommentGate.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write # this can be read if signatures are in a remote repository
       issues: write
       pull-requests: write
-    # Serialize runs for one Pull Request. The action uses a bounded merge
-    # retry when separate Pull Requests update the shared ledger together.
+    # Serialize signer runs for one Pull Request. A separate lock job uses the
+    # distinct cla-lock group documented below and validates the live PR too.
     concurrency:
       group: cla-signatures-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}
       # Keep cancellation disabled. GitHub retains one running and one
@@ -124,13 +126,13 @@ jobs:
 
 Replace `<REPLACE_WITH_CLA_URL>` with the non-empty absolute HTTPS URL of the CLA or DCO. The action rejects an empty, relative, or non-HTTPS value before it makes a GitHub write.
 
-The `CLACommentGate` job has no write permission. Its bounded concurrency group separates each repository, event class, and Pull Request. Its `if` guard filters most comments, but GitHub expression equality is case-insensitive. The shell step is the authority for the required case-sensitive comparison. The privileged `CLAAssistant` job enters its own concurrency group only after this gate succeeds. If you set `custom-pr-sign-comment`, replace the default declaration in the gate `if` guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the signer job to run for every issue comment.
+The `CLACommentGate` job admits the listed `pull_request_target` lifecycle actions and filtered new `issue_comment` events. It has no write permission. Its bounded concurrency group separates each repository, event class, and Pull Request. Its `if` guard filters most comments, but GitHub expression equality is case-insensitive. The shell step runs for comments and is the authority for the required case-sensitive comparison. The privileged `CLAAssistant` job requires gate success for both event classes and enters its own signer concurrency group only after the gate succeeds. If you set `custom-pr-sign-comment`, replace the default declaration in the gate `if` guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the signer job to run for every issue comment.
 
 GitHub workflow event admission cannot compare a comment body case-sensitively. The unprivileged gate must start a runner to reject a case variant. GitHub keeps only one pending run in each concurrency group, so a same-PR case variant can replace one pending gate run before the exact shell check. It cannot enter the privileged signer queue. The contributor must post the exact comment again when this occurs. A high-volume public repository needs a trusted webhook or GitHub App classifier, or an external rate limit, when this fairness or runner-resource denial-of-service risk is material.
 
 The shell step and the action compare the raw comment body and do not trim whitespace. Contributors must post the declaration with no leading or trailing whitespace for it to count as an electronic signature. Keep the `pull_request_target.branches` filter and `required-base-ref` input set to the same protected branch. The event filter avoids unnecessary runs; the action input revalidates the live base branch before a write or lock.
 
-This version accepts signing and `recheck` only on newly created comments. A declaration comment must have matching GitHub creation and update timestamps. A comment edited into the declaration stays invalid on a later `recheck`. The workflow rejects `issue_comment` `edited` events. Do not add an `edited` trigger unless a later action version validates the edited event and the exact updated declaration at runtime.
+This version accepts signing and `recheck` only on newly created comments. A declaration comment must have matching GitHub creation and update timestamps. A comment edited into the declaration stays invalid on a later `recheck`. The workflow does not trigger on `issue_comment` `edited` events. The `pull_request_target` `edited` lifecycle event is admitted for the action's live validation. Do not add an issue-comment `edited` trigger unless a later action version validates the edited event and the exact updated declaration at runtime.
 
 The sample lets any Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch.
 
@@ -189,7 +191,7 @@ The action re-fetches accepted signing comments immediately before a ledger writ
 
 #### 2. Pull Request event triggers CLA Workflow
 
-CLA action workflow will be triggered on Pull Request `opened, closed, reopened, synchronize` events. This workflow will always run in the base repository and that's why we are making use of the [pull_request_target](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request_target) event. The action validates the live Pull Request state, opener, base repository ID, base branch, head repository ID, head branch, and head commit before it writes signature data.
+CLA action workflow will be triggered on Pull Request `opened, edited, closed, reopened, synchronize` events. This workflow will always run in the base repository and that's why we are making use of the [pull_request_target](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request_target) event. The action validates the live Pull Request state, opener, base repository ID, base branch, head repository ID, head branch, and head commit before it writes signature data.
 
 The action fails closed for every unlinked committer, including metadata that claims to be `GitHub <noreply@github.com>` or `web-flow`. Git names and email addresses are not authenticated and can be forged. `allowlist-ids` cannot match an unresolved identity.
 
@@ -200,7 +202,7 @@ The action fails closed when a Pull Request has more than 1,000 commits, more th
 
 #### 3. Signing the CLA
 
-CLA workflow creates a comment on Pull Request asking contributors who have not signed  CLA to sign and also fails the pull request status check with a `failure`. Contributors must post a new comment with **"I have read the CLA Document and I hereby sign the CLA"** as the full raw Pull Request comment body. Leading or trailing whitespace, blank lines, case changes, wording changes, punctuation, and internal whitespace changes do not count. An edited comment does not trigger the workflow. Put `recheck` in a separate new comment. Only a comment author that GitHub identifies as a `User` with a positive numeric account ID can sign. Bot, organization, mannequin, missing-type, and invalid-ID actors fail closed.
+CLA workflow creates a comment on Pull Request asking contributors who have not signed  CLA to sign and also fails the pull request status check with a `failure`. Contributors must post a new comment with **"I have read the CLA Document and I hereby sign the CLA"** as the full raw Pull Request comment body. Leading or trailing whitespace, blank lines, case changes, wording changes, punctuation, and internal whitespace changes do not count. An edited `issue_comment` does not trigger the workflow, and an edited declaration remains invalid. Put `recheck` in a separate new comment. Only a comment author that GitHub identifies as a `User` with a positive numeric account ID can sign. Bot, organization, mannequin, missing-type, and invalid-ID actors fail closed.
 If the contributor has already signed the CLA, then the PR status will pass with `success`. <br/>
 
 This action does not rerun an earlier workflow after it records a signature. Repositories that need an immediate required-check update must use a separate trusted job. That job must bind the rerun to the current Pull Request number, head commit SHA, workflow file, and base branch before it calls the Actions rerun API.
@@ -219,7 +221,7 @@ After the contributor signed a CLA, the contributor's signature with metadata wi
 
 Protect the signature ledger from normal collaborator writes. Use a repository ruleset that permits only the trusted CLA automation identity, or store the ledger in a private repository where only that identity can write. The action token or configured App/PAT must have permission to update the protected target.
 
-If you split merged-pull-request locking into another job, use the same `cla-signatures-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}` group and set `cancel-in-progress: false`. The lock and signature jobs for one Pull Request must not run together.
+If you split merged-pull-request locking into another job, keep the signer group as `cla-signatures-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}` and give the lock job the distinct `cla-lock-${{ github.repository }}-${{ github.event.pull_request.number || github.event.issue.number }}` group. Set `cancel-in-progress: false` in both groups. The lock and signer jobs may overlap, but each must validate the live Pull Request immediately before its write. Separate groups prevent a pending lock run from replacing a signer run.
 
 Ledger entries do not contain a CLA document hash or terms version. If the CLA text changes, use a new ledger path and signing declaration, and require contributors to sign again. Without this policy, an old ledger entry cannot prove which document version the contributor accepted.
 
