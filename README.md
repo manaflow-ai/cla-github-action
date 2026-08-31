@@ -33,6 +33,7 @@ on:
   issue_comment:
     types: [created]
   pull_request_target:
+    branches: [main]
     types: [opened,closed,reopened,synchronize]
 
 permissions: {}
@@ -91,6 +92,8 @@ jobs:
 ```
 
 The job `if` guard must use the same exact signing declaration as the action. If you set `custom-pr-sign-comment`, replace the default CLA declaration in the guard with that custom text. If you set `use-dco-flag: true`, replace it with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the guard to run privileged code for every issue comment.
+
+The issue-comment guard compares the raw body and does not trim whitespace. Contributors must post the declaration with no leading or trailing whitespace for that event to start the job. The action itself ignores only surrounding whitespace after it starts. Keep the `pull_request_target.branches` filter and `required-base-ref` input set to the same protected branch. The event filter avoids unnecessary runs; the action input revalidates the live base branch before a write or lock.
 
 The sample lets any Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch.
 
