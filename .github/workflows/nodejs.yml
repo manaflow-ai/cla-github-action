@@ -31,9 +31,13 @@ jobs:
         node-version: ${{ matrix.node-version }}
     - name: Npm install
       run: npm ci
+    - name: Npm build
+      run: npm run build --if-present
+    - name: Verify generated bundle is committed
+      # GitHub Actions executes dist/index.js from the consumer's pinned
+      # commit. Reject a hand-edited or stale bundle before tests can pass.
+      run: git diff --exit-code -- dist/
     - name: Lint (prettier + knip + publint)
       run: npm run lint
     - name: Npm test
       run: npm test
-    - name: Npm build
-      run: npm run build --if-present
