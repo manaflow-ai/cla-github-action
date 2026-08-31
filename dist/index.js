@@ -48085,7 +48085,7 @@ const getRemoteOrgName = () => {
 const getPathToSignatures = () => getInput('path-to-signatures', { required: false });
 const getPathToDocument = () => getInput('path-to-document', { required: false });
 const getBranch = () => getInput('branch', { required: false });
-const getRequiredBaseRef = () => getInput('required-base-ref', { required: false }) || 'main';
+const getRequiredBaseRef = () => getInput('required-base-ref', { required: false });
 const getAllowListItem = () => getInput('allowlist', { required: false });
 const getAllowListIds = () => getInput('allowlist-ids', { required: false });
 const getSignedCommitMessage = () => getInput('signed-commit-message', { required: false });
@@ -48425,7 +48425,14 @@ function actorsMatch(left, right) {
     return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
 }
 
+;// CONCATENATED MODULE: ./src/shared/limits.ts
+/** Fail-closed bounds for data controlled by Pull Request contributors. */
+const MAX_PULL_REQUEST_COMMENTS = 1000;
+const MAX_LEDGER_SIGNATURES = 10_000;
+const MAX_LEDGER_BYTES = 2 * 1024 * 1024;
+
 ;// CONCATENATED MODULE: ./src/persistence/persistence.ts
+
 
 
 
@@ -48482,7 +48489,7 @@ async function updateFile(sha, claFileContent, reactedCommitters) {
 }
 function dedupeSignatures(signatures) {
     const seen = new Set();
-    return signatures.filter(signature => {
+    const deduped = signatures.filter(signature => {
         if (!Number.isSafeInteger(signature.id) || signature.id <= 0) {
             throw new Error('Cannot persist a CLA signature without a valid user ID');
         }
@@ -48491,6 +48498,10 @@ function dedupeSignatures(signatures) {
         seen.add(signature.id);
         return true;
     });
+    if (deduped.length > MAX_LEDGER_SIGNATURES) {
+        throw new Error(`Cannot persist more than ${MAX_LEDGER_SIGNATURES} CLA signatures in one ledger`);
+    }
+    return deduped;
 }
 function buildSignedCommitMessage(pullRequestNo) {
     const template = getSignedCommitMessage();
@@ -48525,16 +48536,12 @@ function getPrSignComment() {
         : DEFAULT_CLA_SIGN_PHRASE;
 }
 
-;// CONCATENATED MODULE: ./src/shared/limits.ts
-/** Fail-closed bounds for data controlled by Pull Request contributors. */
-const MAX_PULL_REQUEST_COMMENTS = 1000;
-const MAX_LEDGER_SIGNATURES = 10_000;
-const MAX_LEDGER_BYTES = (/* unused pure expression or super */ null && (2 * 1024 * 1024));
-
 ;// CONCATENATED MODULE: ./src/pullrequest/pullRequestComments.ts
 
 
 
+class PullRequestCommentLimitError extends Error {
+}
 /**
  * List every Pull Request comment while bounding work on contributor-controlled
  * input. The extra page that crosses the limit is read only to prove that the
@@ -48551,7 +48558,7 @@ async function listBoundedPullRequestComments() {
         const page = response.data;
         observed += page.length;
         if (observed > MAX_PULL_REQUEST_COMMENTS) {
-            throw new Error(`A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`);
+            throw new PullRequestCommentLimitError(`A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`);
         }
         return page;
     });
@@ -48765,6 +48772,7 @@ function renderUnlinkedCommitBlock(mode, unlinked) {
 
 
 
+
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
 async function prCommentSetup(committerMap, committers) {
     const signed = committerMap?.notSigned && committerMap?.notSigned.length === 0;
@@ -48817,12 +48825,7 @@ async function updateComment(signed, committerMap, claBotComment) {
 }
 async function getComment() {
     try {
-        const comments = await octokit.paginate(octokit.rest.issues.listComments, {
-            owner: github_context.repo.owner,
-            repo: github_context.repo.repo,
-            issue_number: github_context.issue.number,
-            per_page: 100
-        });
+        const comments = await listBoundedPullRequestComments();
         const marker = getUseDcoFlag()
             ? /.*DCO Assistant Lite bot.*/m
             : /.*CLA Assistant Lite bot.*/m;
@@ -48850,7 +48853,9 @@ async function getComment() {
         }
         return trusted;
     }
-    catch {
+    catch (error) {
+        if (error instanceof PullRequestCommentLimitError)
+            throw error;
         throw new Error('Could not retrieve or verify CLA bot comments');
     }
 }
@@ -48916,7 +48921,7 @@ async function validateLivePullRequest(expected) {
         liveRepositoryId !== repositoryId) {
         throw new Error('Live Pull Request base repository ID does not match the event repository; refusing a CLA signature write');
     }
-    if (pullRequest.base.ref !== requiredBaseRef) {
+    if (requiredBaseRef && pullRequest.base.ref !== requiredBaseRef) {
         throw new Error(`Live Pull Request base branch is '${pullRequest.base.ref}', not '${requiredBaseRef}'; refusing a CLA signature write`);
     }
     if (!pullRequest.head.sha?.trim() ||
@@ -48960,15 +48965,66 @@ async function validateLivePullRequest(expected) {
     validatePayloadAgainstLive(snapshot, repository);
     return snapshot;
 }
-function validateEvent(repository) {
-    const payloadRepository = github_context.payload.repository?.full_name;
-    const payloadRepositoryId = github_context.payload.repository?.id;
-    if (typeof payloadRepository !== 'string' ||
-        payloadRepository.toLowerCase() !== repository.toLowerCase() ||
-        !Number.isSafeInteger(payloadRepositoryId) ||
-        Number(payloadRepositoryId) <= 0) {
-        throw new Error(`Event repository does not match ${repository}; refusing CLA processing`);
+/**
+ * Re-fetch and authenticate a closed merged Pull Request before the action
+ * locks its conversation. A pull_request_target payload is trusted only when
+ * its full repository, ref, commit, opener, state, and merge identity match
+ * the live Pull Request API response.
+ */
+async function validateMergedPullRequestForLock() {
+    const repository = `${github_context.repo.owner}/${github_context.repo.repo}`;
+    const repositoryId = validateEventRepository(repository);
+    const eventPullRequest = github_context.payload.pull_request;
+    if (github_context.eventName !== 'pull_request_target' ||
+        github_context.payload.action !== 'closed' ||
+        !eventPullRequest ||
+        eventPullRequest.number !== github_context.issue.number ||
+        eventPullRequest.state !== 'closed' ||
+        eventPullRequest.merged !== true) {
+        throw new Error('Event is not a closed merged pull_request_target event; refusing to lock');
     }
+    const response = await octokit.rest.pulls.get({
+        owner: github_context.repo.owner,
+        repo: github_context.repo.repo,
+        pull_number: github_context.issue.number
+    });
+    const pullRequest = response.data;
+    const requiredBaseRef = getRequiredBaseRef();
+    const liveBaseRepository = pullRequest.base.repo;
+    const liveHeadRepository = pullRequest.head.repo;
+    const opener = pullRequest.user;
+    if (pullRequest.state !== 'closed' ||
+        pullRequest.merged !== true ||
+        (requiredBaseRef && pullRequest.base.ref !== requiredBaseRef) ||
+        liveBaseRepository?.full_name?.toLowerCase() !== repository.toLowerCase() ||
+        liveBaseRepository?.id !== repositoryId ||
+        !pullRequest.head.sha?.trim() ||
+        !pullRequest.head.ref?.trim() ||
+        !liveHeadRepository?.full_name?.trim() ||
+        !Number.isSafeInteger(liveHeadRepository?.id) ||
+        Number(liveHeadRepository?.id) <= 0 ||
+        !opener ||
+        !Number.isSafeInteger(opener.id) ||
+        opener.id <= 0 ||
+        !opener.login?.trim()) {
+        throw new Error('Live Pull Request is not a complete closed merged Pull Request; refusing to lock');
+    }
+    if (eventPullRequest.head?.sha !== pullRequest.head.sha ||
+        eventPullRequest.head.ref !== pullRequest.head.ref ||
+        eventPullRequest.head.repo?.full_name?.toLowerCase() !==
+            liveHeadRepository.full_name.toLowerCase() ||
+        eventPullRequest.head.repo?.id !== liveHeadRepository.id ||
+        eventPullRequest.base?.ref !== pullRequest.base.ref ||
+        eventPullRequest.base.repo?.full_name?.toLowerCase() !==
+            liveBaseRepository.full_name.toLowerCase() ||
+        eventPullRequest.base.repo?.id !== liveBaseRepository.id ||
+        eventPullRequest.user?.id !== opener.id ||
+        eventPullRequest.user.login.toLowerCase() !== opener.login.toLowerCase()) {
+        throw new Error('Closed Pull Request event does not match the live merged Pull Request identity; refusing to lock');
+    }
+}
+function validateEvent(repository) {
+    const payloadRepositoryId = validateEventRepository(repository);
     if (github_context.eventName === 'issue_comment') {
         const issue = github_context.payload.issue;
         if (github_context.payload.action !== 'created' ||
@@ -48991,6 +49047,17 @@ function validateEvent(repository) {
     }
     throw new Error(`Event '${github_context.eventName}' is not allowed to write CLA signatures`);
 }
+function validateEventRepository(repository) {
+    const payloadRepository = github_context.payload.repository?.full_name;
+    const payloadRepositoryId = github_context.payload.repository?.id;
+    if (typeof payloadRepository !== 'string' ||
+        payloadRepository.toLowerCase() !== repository.toLowerCase() ||
+        !Number.isSafeInteger(payloadRepositoryId) ||
+        Number(payloadRepositoryId) <= 0) {
+        throw new Error(`Event repository does not match ${repository}; refusing CLA processing`);
+    }
+    return Number(payloadRepositoryId);
+}
 function validatePayloadAgainstLive(live, repository) {
     if (github_context.eventName !== 'pull_request_target')
         return;
@@ -49009,6 +49076,7 @@ function validatePayloadAgainstLive(live, repository) {
 }
 
 ;// CONCATENATED MODULE: ./src/setupClaCheck.ts
+
 
 
 
@@ -49073,7 +49141,14 @@ async function getCLAFileContentandSHA(committers, committerMap, livePullRequest
         }
     }
     sha = result?.data?.sha;
-    claFileContentString = Buffer.from(result.data.content, 'base64').toString();
+    if (typeof result.data.content !== 'string') {
+        throw new Error('Invalid CLA signature ledger: file content is missing');
+    }
+    const claFileContentBuffer = Buffer.from(result.data.content, 'base64');
+    if (claFileContentBuffer.byteLength > MAX_LEDGER_BYTES) {
+        throw new Error(`Invalid CLA signature ledger: file is larger than ${MAX_LEDGER_BYTES} bytes`);
+    }
+    claFileContentString = claFileContentBuffer.toString();
     claFileContent = parseClaFileContent(claFileContentString);
     return { claFileContent, sha };
 }
@@ -49092,6 +49167,9 @@ function parseClaFileContent(raw) {
     }
     const signatures = parsed
         .signedContributors;
+    if (signatures.length > MAX_LEDGER_SIGNATURES) {
+        throw new Error(`Invalid CLA signature ledger: more than ${MAX_LEDGER_SIGNATURES} signatures`);
+    }
     const byId = new Map();
     for (const value of signatures) {
         if (!isValidSignature(value)) {
@@ -49226,12 +49304,14 @@ async function lockPullRequest() {
 
 
 
+
 async function run() {
     try {
         info(`CLA Assistant GitHub Action bot has started the process`);
         if (github_context.payload.action === 'closed' &&
             lockPullRequestAfterMerge()) {
             if (github_context.payload.pull_request?.merged) {
+                await validateMergedPullRequestForLock();
                 return lockPullRequest();
             }
             info(`Pull request ${github_context.issue.number} was closed without merging, not locking it`);

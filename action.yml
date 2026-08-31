@@ -12,8 +12,8 @@ inputs:
     description: "Branch where signatures are stored. Restrict writes to trusted CLA automation and ensure its token can write."
     default: "master"
   required-base-ref:
-    description: "Pull Request base branch allowed to write signatures."
-    default: "main"
+    description: "Optional Pull Request base branch allowed to write signatures or be locked after merge. Set this explicitly to enforce a branch."
+    default: ""
   allowlist:
     description: "Deprecated and ignored. Raw names, emails, and globs can be spoofed in commit metadata."
     default: ""

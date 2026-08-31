@@ -51,6 +51,8 @@ commit that introduced it.
   than 10,000 entries or 2 MiB fail closed.
 - A closed event is re-fetched and matched by repository IDs, refs, head SHA,
   opener, state, and merge result before the action locks the conversation.
+- The new `required-base-ref` input has an empty compatibility default, which
+  preserves upstream behavior. Protected deployments must set it explicitly.
 
 ### Changed
 

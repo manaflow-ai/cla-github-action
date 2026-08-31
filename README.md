@@ -197,7 +197,7 @@ This PAT should have repo scope and is only required if you have configured to s
 | `path-to-document`     | _required_ |  provide full URL `https://<clafile>` to the document which shall be signed by the contributor(s)  It can be any file e.g. inside the repository or it can be a gist. | https://github.com/cla-assistant/github-action/blob/master/SAPCLA.md |
 | `path-to-signatures`       | _optional_ |  Path to the JSON file where  all the signatures of the contributors will be stored inside the repository. | signatures/version1/cla.json |
 | `branch`   | _optional_ |  Branch in which all the signatures of the contributors will be stored and Default branch is `master`.  | master |
-| `required-base-ref`   | _optional_ | Only an open Pull Request with this live base branch can write signature data. The default is `main`. | main |
+| `required-base-ref`   | _optional_ | Only a Pull Request with this live base branch can write signature data or be locked after merge. The compatibility default is empty, which does not restrict the base branch. Set this input explicitly for protected use. | main |
 | `allowlist-ids`   | _optional_ | Comma-separated numeric GitHub user IDs. Only the authenticated live Pull Request opener can be exempt. Commit-derived identities are never exempt. | 49699333,29139614 |
 | `allowlist`   | _deprecated_ | Ignored. Raw names, emails, and globs are unsafe identity evidence. | |
 | `remote-repository-name`   | _optional_ | provide the remote repository name where all the signatures should be stored . | remote repository name |

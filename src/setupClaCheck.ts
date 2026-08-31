@@ -22,10 +22,7 @@ import {
   LivePullRequestSnapshot,
   validateLivePullRequest
 } from './livePullRequest'
-import {
-  MAX_LEDGER_BYTES,
-  MAX_LEDGER_SIGNATURES
-} from './shared/limits'
+import { MAX_LEDGER_BYTES, MAX_LEDGER_SIGNATURES } from './shared/limits'
 
 export async function setupClaCheck() {
   const livePullRequest = await validateLivePullRequest()

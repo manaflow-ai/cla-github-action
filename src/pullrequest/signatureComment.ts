@@ -1,4 +1,3 @@
-import { octokit } from '../octokit'
 import { context } from '@actions/github'
 import {
   Committer,

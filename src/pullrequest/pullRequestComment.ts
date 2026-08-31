@@ -6,7 +6,10 @@ import { CommitterMap, Committer, ReactedCommitterMap } from '../interfaces'
 import { getUseDcoFlag } from '../shared/getInputs'
 import { errorMessage } from '../shared/errors'
 import * as core from '@actions/core'
-import { listBoundedPullRequestComments } from './pullRequestComments'
+import {
+  listBoundedPullRequestComments,
+  PullRequestCommentLimitError
+} from './pullRequestComments'
 
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]'
 
@@ -130,7 +133,8 @@ async function getComment() {
       )
     }
     return trusted
-  } catch {
+  } catch (error) {
+    if (error instanceof PullRequestCommentLimitError) throw error
     throw new Error('Could not retrieve or verify CLA bot comments')
   }
 }

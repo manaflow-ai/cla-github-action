@@ -2,9 +2,11 @@ import { context } from '@actions/github'
 import { octokit } from '../octokit'
 import { MAX_PULL_REQUEST_COMMENTS } from '../shared/limits'
 
-export type PullRequestComment = Awaited<
+type PullRequestComment = Awaited<
   ReturnType<typeof octokit.rest.issues.listComments>
 >['data'][number]
+
+export class PullRequestCommentLimitError extends Error {}
 
 /**
  * List every Pull Request comment while bounding work on contributor-controlled
@@ -27,7 +29,7 @@ export async function listBoundedPullRequestComments(): Promise<
       const page = response.data
       observed += page.length
       if (observed > MAX_PULL_REQUEST_COMMENTS) {
-        throw new Error(
+        throw new PullRequestCommentLimitError(
           `A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`
         )
       }

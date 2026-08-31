@@ -62,7 +62,7 @@ export async function validateLivePullRequest(
       'Live Pull Request base repository ID does not match the event repository; refusing a CLA signature write'
     )
   }
-  if (pullRequest.base.ref !== requiredBaseRef) {
+  if (requiredBaseRef && pullRequest.base.ref !== requiredBaseRef) {
     throw new Error(
       `Live Pull Request base branch is '${pullRequest.base.ref}', not '${requiredBaseRef}'; refusing a CLA signature write`
     )
@@ -160,7 +160,7 @@ export async function validateMergedPullRequestForLock(): Promise<void> {
   if (
     pullRequest.state !== 'closed' ||
     pullRequest.merged !== true ||
-    pullRequest.base.ref !== requiredBaseRef ||
+    (requiredBaseRef && pullRequest.base.ref !== requiredBaseRef) ||
     liveBaseRepository?.full_name?.toLowerCase() !== repository.toLowerCase() ||
     liveBaseRepository?.id !== repositoryId ||
     !pullRequest.head.sha?.trim() ||

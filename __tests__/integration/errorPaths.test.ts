@@ -298,9 +298,7 @@ describe('error paths', () => {
 
     await runAction()
 
-    expect(watch.failures.join('\n')).toMatch(
-      /more than 10000 signatures/i
-    )
+    expect(watch.failures.join('\n')).toMatch(/more than 10000 signatures/i)
     expect(fake.repo('acme', 'widgets').listComments(35)).toHaveLength(0)
     watch.restore()
   })
