@@ -59,7 +59,7 @@ jobs:
     steps:
       - name: "CLA Assistant"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@f5914a1ba70d14ca6389557b748f8e51b91a6490
+        uses: manaflow-ai/cla-github-action@e228b3c6860cb66ffca9d68dcb074c2e66c4c431
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # the below token should have repo scope and must be manually added by you in the repository's secret
@@ -124,7 +124,7 @@ The sample lets any Pull Request commenter use `recheck` only to refresh this ac
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: manaflow-ai/cla-github-action@f5914a1ba70d14ca6389557b748f8e51b91a6490
+> uses: manaflow-ai/cla-github-action@e228b3c6860cb66ffca9d68dcb074c2e66c4c431
 > ```
 >
 > Tools like [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
