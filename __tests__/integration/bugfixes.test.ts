@@ -167,6 +167,125 @@ describe('bug fixes', () => {
       watch.restore()
     })
 
+    it('recovers a simultaneous empty-ledger create and keeps unsigned contributors pending', async () => {
+      const watch = watchCore()
+      const repository = fake.repo('acme', 'widgets')
+      repository.addPullRequest({
+        number: 11,
+        head: { sha: 'headsha', ref: 'feature/bootstrap-race' },
+        user: { login: 'alice', id: 1001 },
+        commits: [{ author: { login: 'alice', id: 1001 } }]
+      })
+      // Model another PR creating the file after this run observes a 404 but
+      // before its create request reaches GitHub.
+      repository.setFile('signatures/cla.json', { signedContributors: [] })
+      fake.injectFailure({
+        method: 'GET',
+        pathPattern: /\/repos\/acme\/widgets\/contents\/signatures/,
+        status: 404,
+        times: 1
+      })
+      fake.injectFailure({
+        method: 'PUT',
+        pathPattern: /\/repos\/acme\/widgets\/contents\/signatures/,
+        status: 422,
+        body: JSON.stringify({ message: 'sha was not supplied' }),
+        times: 1
+      })
+      setContext({
+        owner: 'acme',
+        repo: 'widgets',
+        issueNumber: 11,
+        actor: 'alice',
+        eventName: 'pull_request_target',
+        payload: {
+          action: 'opened',
+          pull_request: { number: 11, state: 'open' },
+          repository: { id: repository.state.id }
+        }
+      })
+
+      await runAction()
+
+      expect(repository.getFile('signatures/cla.json')).toEqual({
+        signedContributors: []
+      })
+      const trustedMarker = repository
+        .listComments(11)
+        .find(comment => comment.user.login === 'github-actions[bot]')
+      expect(trustedMarker?.body).not.toMatch(
+        /all contributors have signed the cla/i
+      )
+      expect(watch.failures.join('\n')).toMatch(/have to sign the CLA/i)
+      expect(watch.failures.join('\n')).not.toMatch(
+        /creating the signed contributors file/i
+      )
+      watch.restore()
+    })
+
+    it('persists a signature after a simultaneous create before reporting all signed', async () => {
+      const watch = watchCore()
+      const repository = fake.repo('acme', 'widgets')
+      repository.addPullRequest({
+        number: 12,
+        head: { sha: 'headsha', ref: 'feature/bootstrap-race-signature' },
+        user: { login: 'alice', id: 1001 },
+        commits: [{ author: { login: 'alice', id: 1001 } }]
+      })
+      repository.addComment(12, {
+        body: 'I have read the CLA Document and I hereby sign the CLA',
+        user: { login: 'alice', id: 1001, type: 'User' }
+      })
+      repository.setFile('signatures/cla.json', { signedContributors: [] })
+      fake.injectFailure({
+        method: 'GET',
+        pathPattern: /\/repos\/acme\/widgets\/contents\/signatures/,
+        status: 404,
+        times: 1
+      })
+      fake.injectFailure({
+        method: 'PUT',
+        pathPattern: /\/repos\/acme\/widgets\/contents\/signatures/,
+        status: 422,
+        body: JSON.stringify({ message: 'sha was not supplied' }),
+        times: 1
+      })
+      setContext({
+        owner: 'acme',
+        repo: 'widgets',
+        issueNumber: 12,
+        actor: 'alice',
+        eventName: 'issue_comment',
+        payload: {
+          action: 'created',
+          issue: { number: 12, state: 'open', pull_request: {} },
+          comment: {
+            body: 'I have read the CLA Document and I hereby sign the CLA',
+            user: { login: 'alice', id: 1001, type: 'User' }
+          },
+          repository: { id: repository.state.id, full_name: 'acme/widgets' }
+        }
+      })
+
+      await runAction()
+
+      const ledger = repository.getFile('signatures/cla.json') as any
+      expect(ledger.signedContributors).toContainEqual(
+        expect.objectContaining({ name: 'alice', id: 1001 })
+      )
+      expect(repository.listComments(12)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            body: expect.stringMatching(
+              /all contributors have signed the cla/i
+            )
+          })
+        ])
+      )
+      expect(watch.failures).toEqual([])
+      watch.restore()
+    })
+
     it('passes when the first Pull Request opener is allowlisted', async () => {
       const watch = watchCore()
       const repository = fake.repo('acme', 'widgets')
