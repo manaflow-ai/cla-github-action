@@ -47,7 +47,7 @@ describe('error paths', () => {
     resetEnv()
   })
 
-  it('reports a one-shot 5xx without hiding the failed GitHub request', async () => {
+  it('retries and recovers from a one-shot GitHub 5xx response', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 7,
@@ -82,8 +82,12 @@ describe('error paths', () => {
     await runAction()
 
     expect(watch.failures.join('\n')).toMatch(
+      /Committers of Pull Request number 7/
+    )
+    expect(watch.failures.join('\n')).not.toMatch(
       /Could not retrieve repository contents|Could not update the JSON file/
     )
+    expect(fake.repo('acme', 'widgets').listComments(7)).toHaveLength(1)
     watch.restore()
   })
 
