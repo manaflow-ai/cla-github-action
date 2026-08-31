@@ -84,6 +84,9 @@ jobs:
       contents: write # this can be read if signatures are in a remote repository
       issues: write
       pull-requests: write
+      # No statuses permission is needed. The action fails or succeeds this
+      # GitHub Actions job through @actions/core and never calls the commit
+      # status or check-run APIs.
     # Advisory signer only. A separate trusted exact-head worker is required
     # when this check is required by branch protection. Serialize signer runs
     # for one Pull Request. A separate lock job uses the
@@ -215,8 +218,8 @@ The action fails closed when a Pull Request has more than 1,000 commits, more th
 
 #### 3. Signing the CLA
 
-CLA workflow creates a comment on Pull Request asking contributors who have not signed  CLA to sign and also fails the pull request status check with a `failure`. Contributors must post a new comment with **"I have read the CLA Document and I hereby sign the CLA"** as the full raw Pull Request comment body. Leading or trailing whitespace, blank lines, case changes, wording changes, punctuation, and internal whitespace changes do not count. An edited `issue_comment` does not trigger the workflow, and an edited declaration remains invalid. Put `recheck` in a separate new comment. Only a comment author that GitHub identifies as a `User` with a positive numeric account ID can sign. Bot, organization, mannequin, missing-type, and invalid-ID actors fail closed.
-If the contributor has already signed the CLA, then the PR status will pass with `success`. <br/>
+CLA workflow creates a comment on Pull Request asking contributors who have not signed the CLA to sign and fails the `CLA Assistant` GitHub Actions job. Contributors must post a new comment with **"I have read the CLA Document and I hereby sign the CLA"** as the full raw Pull Request comment body. Leading or trailing whitespace, blank lines, case changes, wording changes, punctuation, and internal whitespace changes do not count. An edited `issue_comment` does not trigger the workflow, and an edited declaration remains invalid. Put `recheck` in a separate new comment. Only a comment author that GitHub identifies as a `User` with a positive numeric account ID can sign. Bot, organization, mannequin, missing-type, and invalid-ID actors fail closed.
+If the contributor has already signed the CLA, the `CLA Assistant` job succeeds. The GitHub Actions runner publishes that job as the Pull Request check; this action does not create a separate commit status or check run. <br/>
 
 This action does not rerun an earlier workflow after it records a signature. Repositories that need an immediate required-check update must use a separate trusted job. That job must authenticate the exact signing event, bind the rerun to the current Pull Request number, head commit SHA, workflow file, and base branch, and then call the Actions rerun API. The sample signer has no `actions: write` permission and is advisory for `issue_comment` runs by design.
 
