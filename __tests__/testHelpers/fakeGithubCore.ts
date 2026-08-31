@@ -35,6 +35,8 @@ export interface PullRequest {
     apiRef?: string
     repoFullName?: string
     repoId?: number
+    /** Simulate GitHub returning head.repo = null after source deletion. */
+    repoDeleted?: boolean
   }
   base?: { ref: string; repoFullName: string; repoId?: number }
   user?: GitActorFixture
@@ -282,10 +284,12 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       head: {
         sha: pr.head.sha,
         ref: pr.head.apiRef || 'feature/test',
-        repo: {
-          full_name: pr.head.repoFullName || `${owner}/${name}`,
-          id: pr.head.repoId || repository.id
-        }
+        repo: pr.head.repoDeleted
+          ? null
+          : {
+              full_name: pr.head.repoFullName || `${owner}/${name}`,
+              id: pr.head.repoId || repository.id
+            }
       },
       base: {
         ref: pr.base?.ref || 'main',

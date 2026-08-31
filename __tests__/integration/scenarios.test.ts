@@ -381,6 +381,162 @@ describe('CLA action end-to-end scenarios', () => {
     ])
   })
 
+  it('locks a merged PR after its source branch advances', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    setInput('lock-pullrequest-aftermerge', 'true')
+    repository.addPullRequest({
+      number: 38,
+      head: {
+        sha: 'advanced-headsha',
+        ref: 'feature/advanced-after-merge',
+        apiRef: 'feature/advanced-after-merge'
+      },
+      user: { login: 'alice', id: 1001 },
+      merged: true,
+      state: 'closed',
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 38,
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'closed',
+        pull_request: {
+          number: 38,
+          state: 'closed',
+          merged: true,
+          head: {
+            sha: 'merged-headsha',
+            ref: 'feature/advanced-after-merge',
+            repo: { full_name: 'acme/widgets', id: repository.state.id }
+          },
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: repository.state.id }
+      }
+    })
+
+    await runAction()
+
+    const failures = watch.failures
+    watch.restore()
+    expect(failures).toEqual([])
+    expect(fake.recordedLocks).toContainEqual({
+      owner: 'acme',
+      repo: 'widgets',
+      issue: 38
+    })
+  })
+
+  it('locks a merged PR after its source repository is deleted', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    setInput('lock-pullrequest-aftermerge', 'true')
+    repository.addPullRequest({
+      number: 39,
+      head: {
+        sha: 'merged-headsha',
+        ref: 'feature/deleted-after-merge',
+        apiRef: 'feature/deleted-after-merge',
+        repoDeleted: true
+      },
+      user: { login: 'alice', id: 1001 },
+      merged: true,
+      state: 'closed',
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 39,
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'closed',
+        pull_request: {
+          number: 39,
+          state: 'closed',
+          merged: true,
+          head: {
+            sha: 'merged-headsha',
+            ref: 'feature/deleted-after-merge',
+            repo: { full_name: 'acme/widgets', id: repository.state.id }
+          },
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: repository.state.id }
+      }
+    })
+
+    await runAction()
+
+    const failures = watch.failures
+    watch.restore()
+    expect(failures).toEqual([])
+    expect(fake.recordedLocks).toContainEqual({
+      owner: 'acme',
+      repo: 'widgets',
+      issue: 39
+    })
+  })
+
+  it('does not lock a merged PR with an invalid live head shape', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    setInput('lock-pullrequest-aftermerge', 'true')
+    repository.addPullRequest({
+      number: 40,
+      head: {
+        sha: '',
+        ref: 'feature/malformed-head',
+        apiRef: 'feature/malformed-head'
+      },
+      user: { login: 'alice', id: 1001 },
+      merged: true,
+      state: 'closed',
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 40,
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'closed',
+        pull_request: {
+          number: 40,
+          state: 'closed',
+          merged: true,
+          head: {
+            sha: 'merged-headsha',
+            ref: 'feature/malformed-head',
+            repo: { full_name: 'acme/widgets', id: repository.state.id }
+          },
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: repository.state.id }
+      }
+    })
+
+    await runAction()
+
+    const failures = watch.failures
+    watch.restore()
+    expect(fake.recordedLocks).not.toContainEqual({
+      owner: 'acme',
+      repo: 'widgets',
+      issue: 40
+    })
+    expect(failures.join('\n')).toMatch(
+      /live pull request.*complete closed merged/i
+    )
+  })
+
   it('does not lock when a forged closed event disagrees with the live Pull Request', async () => {
     const watch = watchCore()
     setInput('lock-pullrequest-aftermerge', 'true')
