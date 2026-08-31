@@ -340,13 +340,30 @@ describe('CLA action end-to-end scenarios', () => {
 
   it('Merged PR: lock endpoint is called when lock-pullrequest-aftermerge is true', async () => {
     setInput('lock-pullrequest-aftermerge', 'true')
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 10,
+      head: { sha: 'headsha', ref: 'feature/merged' },
+      user: { login: 'alice', id: 1001 },
+      merged: true,
+      state: 'closed',
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
 
     setContext({
       owner: 'acme',
       repo: 'widgets',
       issueNumber: 10,
-      eventName: 'pull_request',
-      payload: { action: 'closed', pull_request: { number: 10, merged: true } }
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'closed',
+        pull_request: {
+          number: 10,
+          state: 'closed',
+          merged: true,
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
     })
 
     await runAction()
@@ -354,6 +371,42 @@ describe('CLA action end-to-end scenarios', () => {
     expect(fake.recordedLocks).toEqual([
       { owner: 'acme', repo: 'widgets', issue: 10 }
     ])
+  })
+
+  it('does not lock when a forged closed event disagrees with the live Pull Request', async () => {
+    const watch = watchCore()
+    setInput('lock-pullrequest-aftermerge', 'true')
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 36,
+      head: { sha: 'headsha', ref: 'feature/still-open' },
+      user: { login: 'alice', id: 1001 },
+      merged: false,
+      state: 'open',
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 36,
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'closed',
+        pull_request: {
+          number: 36,
+          state: 'closed',
+          merged: true,
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(fake.recordedLocks).toEqual([])
+    expect(watch.failures.join('\n')).toMatch(/live pull request.*merged/i)
+    watch.restore()
   })
 
   it('Remote signatures repo: reads and writes hit the configured remote org/repo', async () => {
@@ -1154,6 +1207,49 @@ describe('CLA action end-to-end scenarios', () => {
       /more than 1000 git identity assertions/i
     )
     expect(fake.repo('acme', 'widgets').listComments(33)).toHaveLength(0)
+    watch.restore()
+  })
+
+  it('fails closed when a pull request has more than 1000 comments', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 34,
+      head: { sha: 'headsha', ref: 'feature/too-many-comments' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: []
+    })
+    for (let i = 0; i < 1001; i++) {
+      fake.repo('acme', 'widgets').addComment(34, {
+        body: `noise ${i}`,
+        user: { login: `user-${i}`, id: 400_000 + i, type: 'User' }
+      })
+    }
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 34,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 34,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /more than 1000 pull request comments/i
+    )
+    expect(fake.repo('acme', 'widgets').listComments(34)).toHaveLength(1001)
     watch.restore()
   })
 

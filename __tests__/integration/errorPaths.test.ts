@@ -264,4 +264,44 @@ describe('error paths', () => {
     expect(fake.repo('acme', 'widgets').listComments(22)).toHaveLength(0)
     watch.restore()
   })
+
+  it('fails closed when the signature ledger has more than 10000 entries', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 35,
+      head: { sha: 'headsha', ref: 'feature/oversized-ledger' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/v1/cla.json', {
+      signedContributors: Array.from({ length: 10_001 }, (_, index) => ({
+        name: `signer-${index}`,
+        id: 500_000 + index
+      }))
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 35,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 35,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /more than 10000 signatures/i
+    )
+    expect(fake.repo('acme', 'widgets').listComments(35)).toHaveLength(0)
+    watch.restore()
+  })
 })
