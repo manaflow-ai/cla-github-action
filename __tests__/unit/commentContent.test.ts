@@ -116,6 +116,39 @@ describe('commentContent (CLA mode)', () => {
       // No email markdown / no backticks around missing email.
       expect(body).not.toMatch(/`<\s*>`/)
     })
+
+    it('renders untrusted git names and emails as inert text', () => {
+      const body = commentContent(
+        false,
+        committerMap({
+          notSigned: [
+            { name: 'safe-user', id: 2, pullRequestNo: 7 },
+            {
+              name: 'Mallory\n> [!CAUTION]\n<script>alert(1)</script>',
+              id: 0,
+              pullRequestNo: 7,
+              email: 'evil` [click](https://evil.test)'
+            }
+          ],
+          unknown: [
+            {
+              name: 'Mallory\n> [!CAUTION]\n<script>alert(1)</script>',
+              id: 0,
+              pullRequestNo: 7,
+              email: 'evil` [click](https://evil.test)'
+            }
+          ]
+        })
+      )
+      expect(body).toContain(
+        '<code>Mallory &gt; [!CAUTION] &lt;script&gt;alert(1)&lt;/script&gt;</code>'
+      )
+      expect(body).toContain(
+        '<code>&lt;evil` [click](https://evil.test)&gt;</code>'
+      )
+      expect(body).not.toContain('<script>alert(1)</script>')
+      expect(body).not.toContain(':x: @Mallory')
+    })
   })
 
   describe('opener-mismatch block', () => {
@@ -170,6 +203,24 @@ describe('commentContent (CLA mode)', () => {
       expect(body).toContain(
         'no author or co-author identities could be identified'
       )
+    })
+
+    it('renders opener and author metadata without Markdown injection', () => {
+      const body = commentContent(
+        true,
+        committerMap({
+          openerMismatch: {
+            opener: 'alice\n@maintainer',
+            commitAuthors: ['bob\n> [!WARNING]', '[click](https://evil.test)'],
+            hardFail: true
+          }
+        })
+      )
+      expect(body).toContain('<code>alice @maintainer</code>')
+      expect(body).toContain('<code>bob &gt; [!WARNING]</code>')
+      expect(body).toContain('<code>[click](https://evil.test)</code>')
+      expect(body).not.toContain('Opener: @alice')
+      expect(body).not.toContain('\n> > [!WARNING]')
     })
   })
 
