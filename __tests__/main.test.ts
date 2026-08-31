@@ -2,10 +2,7 @@ import * as core from '@actions/core'
 import * as github from '@actions/github'
 import { context } from '@actions/github'
 import { setupClaCheck } from '../src/setupClaCheck'
-import {
-  lockPullRequest,
-  unlockPullRequest
-} from '../src/pullrequest/pullRequestLock'
+import { lockPullRequest } from '../src/pullrequest/pullRequestLock'
 import { run } from '../src/main'
 
 jest.mock('@actions/core')
@@ -14,14 +11,14 @@ jest.mock('../src/pullrequest/pullRequestLock')
 jest.mock('../src/setupClaCheck')
 const mockedGetClas = jest.mocked(setupClaCheck)
 const mockedLockPullRequest = jest.mocked(lockPullRequest)
-const mockedUnlockPullRequest = jest.mocked(unlockPullRequest)
 const mockedCoreGetInput = jest.mocked(core.getInput)
+const mockedCoreWarning = jest.mocked(core.warning)
 
 describe('Pull request event', () => {
   beforeEach(async () => {
     mockedGetClas.mockReset()
     mockedLockPullRequest.mockReset()
-    mockedUnlockPullRequest.mockReset()
+    mockedCoreWarning.mockReset()
     mockedCoreGetInput.mockImplementation((name: string) =>
       name === 'lock-pullrequest-aftermerge' ? 'true' : ''
     )
@@ -81,27 +78,31 @@ describe('Pull request event', () => {
     expect(mockedGetClas).not.toHaveBeenCalled()
   })
 
-  test('the unlockPullRequest method should not remove a maintainer lock from a reopened pull request', async () => {
+  test('a reopened pull request keeps its maintainer lock', async () => {
     github.context.payload.action = 'reopened'
     github.context.payload.pull_request!.locked = true
     await run()
-    expect(mockedUnlockPullRequest).not.toHaveBeenCalled()
+    expect(mockedCoreWarning).toHaveBeenCalledWith(
+      expect.stringMatching(/preserves maintainer locks/i)
+    )
     expect(mockedGetClas).toHaveBeenCalled()
   })
 
-  test('the unlockPullRequest method should not be called if an unlocked pull request is reopened', async () => {
+  test('an unlocked pull request can run the check after reopen', async () => {
     github.context.payload.action = 'reopened'
     await run()
-    expect(mockedUnlockPullRequest).not.toHaveBeenCalled()
+    expect(mockedCoreWarning).not.toHaveBeenCalled()
     expect(mockedGetClas).toHaveBeenCalled()
   })
 
-  test('the unlockPullRequest method should not be called if lock-pullrequest-aftermerge is disabled', async () => {
+  test('a maintainer lock is preserved when automatic locking is disabled', async () => {
     mockedCoreGetInput.mockImplementation(() => 'false')
     github.context.payload.action = 'reopened'
     github.context.payload.pull_request!.locked = true
     await run()
-    expect(mockedUnlockPullRequest).not.toHaveBeenCalled()
+    expect(mockedCoreWarning).toHaveBeenCalledWith(
+      expect.stringMatching(/preserves maintainer locks/i)
+    )
     expect(mockedGetClas).toHaveBeenCalled()
   })
 
@@ -118,7 +119,6 @@ describe('Pull request event', () => {
     delete github.context.payload.pull_request
     await run()
     expect(mockedLockPullRequest).not.toHaveBeenCalled()
-    expect(mockedUnlockPullRequest).not.toHaveBeenCalled()
     expect(mockedGetClas).toHaveBeenCalled()
   })
 

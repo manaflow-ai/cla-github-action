@@ -48240,6 +48240,11 @@ function errorStatus(err) {
 
 
 
+// Bound work on untrusted Pull Request data. These limits are well above a
+// normal contribution but stop a single PR from consuming an unbounded number
+// of GraphQL pages or creating an unbounded signature set.
+const MAX_PULL_REQUEST_COMMITS = 1000;
+const MAX_GIT_IDENTITY_ASSERTIONS = 1000;
 const COMMITS_QUERY = `
 query($owner:String! $name:String! $number:Int! $cursor:String){
     repository(owner: $owner, name: $name) {
@@ -48320,6 +48325,10 @@ async function getCommitters() {
         };
         let cursor = null;
         let hasNextPage = true;
+        let observedCommitCount = 0;
+        let reportedCommitCount = null;
+        let identityAssertionCount = 0;
+        const seenCursors = new Set();
         while (hasNextPage) {
             const response = (await octokit.graphql(COMMITS_QUERY, {
                 owner: github_context.repo.owner,
@@ -48328,6 +48337,17 @@ async function getCommitters() {
                 cursor
             }));
             const page = response.repository.pullRequest.commits;
+            if (!Number.isSafeInteger(page.totalCount) ||
+                page.totalCount < 0 ||
+                page.totalCount > MAX_PULL_REQUEST_COMMITS) {
+                throw new Error(`A Pull Request reports more than ${MAX_PULL_REQUEST_COMMITS} commits or an invalid commit count. The action will fail closed.`);
+            }
+            if (reportedCommitCount !== null &&
+                page.totalCount !== reportedCommitCount) {
+                throw new Error('GitHub changed the reported commit count during pagination. The action will fail closed.');
+            }
+            reportedCommitCount = page.totalCount;
+            observedCommitCount += page.edges.length;
             for (const edge of page.edges) {
                 const commit = edge.node.commit;
                 if (commit.authors.pageInfo.hasNextPage) {
@@ -48339,14 +48359,30 @@ async function getCommitters() {
                 if (!actorsMatch(commit.author, commit.authors.nodes[0])) {
                     throw new Error('GitHub returned an author connection that did not start with the primary author. The action will fail closed.');
                 }
+                identityAssertionCount += commit.authors.nodes.length + 1;
+                if (identityAssertionCount > MAX_GIT_IDENTITY_ASSERTIONS) {
+                    throw new Error(`A Pull Request reports more than ${MAX_GIT_IDENTITY_ASSERTIONS} git identity assertions. The action will fail closed.`);
+                }
                 addActor(commit.author, 'primaryAuthor');
                 commit.authors.nodes
                     .slice(1)
                     .forEach(actor => addActor(actor, 'coAuthor'));
                 addActor(commit.committer, 'committer');
             }
-            cursor = page.pageInfo.endCursor;
             hasNextPage = page.pageInfo.hasNextPage;
+            if (hasNextPage) {
+                const nextCursor = page.pageInfo.endCursor;
+                if (!nextCursor || seenCursors.has(nextCursor)) {
+                    throw new Error('GitHub returned invalid commit pagination. The action will fail closed.');
+                }
+                seenCursors.add(nextCursor);
+                cursor = nextCursor;
+            }
+        }
+        if (observedCommitCount === 0 ||
+            observedCommitCount > MAX_PULL_REQUEST_COMMITS ||
+            observedCommitCount !== reportedCommitCount) {
+            throw new Error(`A Pull Request reports no commits, incomplete pagination, or more than ${MAX_PULL_REQUEST_COMMITS} commits. The action will fail closed.`);
         }
         return [...committers.values()];
     }
@@ -49155,20 +49191,6 @@ async function lockPullRequest() {
         error(`Failed to lock pull request ${pullRequestNo}`);
     }
 }
-async function unlockPullRequest() {
-    const pullRequestNo = github_context.issue.number;
-    try {
-        await octokit.rest.issues.unlock({
-            owner: github_context.repo.owner,
-            repo: github_context.repo.repo,
-            issue_number: pullRequestNo
-        });
-        info(`Unlocked reopened pull request ${pullRequestNo} so the CLA check can proceed`);
-    }
-    catch (e) {
-        error(`Failed to unlock pull request ${pullRequestNo}; the CLA check will likely fail because the bot cannot comment on a locked pull request. A maintainer should unlock the conversation manually.`);
-    }
-}
 
 ;// CONCATENATED MODULE: ./src/main.ts
 
@@ -49187,15 +49209,9 @@ async function run() {
             info(`Pull request ${github_context.issue.number} was closed without merging, not locking it`);
             return;
         }
-        // A merged PR can never be reopened, so a lock seen here is either left
-        // over from the pre-v3.1 lock-on-any-close bug or was set manually by a
-        // maintainer. We cannot tell the two apart, and the CLA check cannot
-        // complete on a locked PR (the bot cannot comment), so we accept removing
-        // a manual lock as the cost of unsticking the common case.
         if (github_context.payload.action === 'reopened' &&
-            github_context.payload.pull_request?.locked &&
-            lockPullRequestAfterMerge()) {
-            await unlockPullRequest();
+            github_context.payload.pull_request?.locked) {
+            warning(`Pull request ${github_context.issue.number} is locked. The action preserves maintainer locks. A maintainer must unlock the conversation before contributors can sign.`);
         }
         await setupClaCheck();
     }

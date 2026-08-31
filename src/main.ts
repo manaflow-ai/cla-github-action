@@ -1,9 +1,6 @@
 import { context } from '@actions/github'
 import { setupClaCheck } from './setupClaCheck'
-import {
-  lockPullRequest,
-  unlockPullRequest
-} from './pullrequest/pullRequestLock'
+import { lockPullRequest } from './pullrequest/pullRequestLock'
 
 import * as core from '@actions/core'
 import * as input from './shared/getInputs'
@@ -25,17 +22,13 @@ export async function run() {
       return
     }
 
-    // A merged PR can never be reopened, so a lock seen here is either left
-    // over from the pre-v3.1 lock-on-any-close bug or was set manually by a
-    // maintainer. We cannot tell the two apart, and the CLA check cannot
-    // complete on a locked PR (the bot cannot comment), so we accept removing
-    // a manual lock as the cost of unsticking the common case.
     if (
       context.payload.action === 'reopened' &&
-      context.payload.pull_request?.locked &&
-      input.lockPullRequestAfterMerge()
+      context.payload.pull_request?.locked
     ) {
-      await unlockPullRequest()
+      core.warning(
+        `Pull request ${context.issue.number} is locked. The action preserves maintainer locks. A maintainer must unlock the conversation before contributors can sign.`
+      )
     }
 
     await setupClaCheck()

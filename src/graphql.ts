@@ -44,6 +44,12 @@ interface GraphQLResponse {
 
 type CommitIdentityRole = 'primaryAuthor' | 'coAuthor' | 'committer'
 
+// Bound work on untrusted Pull Request data. These limits are well above a
+// normal contribution but stop a single PR from consuming an unbounded number
+// of GraphQL pages or creating an unbounded signature set.
+const MAX_PULL_REQUEST_COMMITS = 1000
+const MAX_GIT_IDENTITY_ASSERTIONS = 1000
+
 const COMMITS_QUERY = `
 query($owner:String! $name:String! $number:Int! $cursor:String){
     repository(owner: $owner, name: $name) {
@@ -132,6 +138,10 @@ export default async function getCommitters(): Promise<Committer[]> {
 
     let cursor: string | null = null
     let hasNextPage = true
+    let observedCommitCount = 0
+    let reportedCommitCount: number | null = null
+    let identityAssertionCount = 0
+    const seenCursors = new Set<string>()
 
     while (hasNextPage) {
       const response = (await octokit.graphql(COMMITS_QUERY, {
@@ -142,6 +152,25 @@ export default async function getCommitters(): Promise<Committer[]> {
       })) as GraphQLResponse
 
       const page = response.repository.pullRequest.commits
+      if (
+        !Number.isSafeInteger(page.totalCount) ||
+        page.totalCount < 0 ||
+        page.totalCount > MAX_PULL_REQUEST_COMMITS
+      ) {
+        throw new Error(
+          `A Pull Request reports more than ${MAX_PULL_REQUEST_COMMITS} commits or an invalid commit count. The action will fail closed.`
+        )
+      }
+      if (
+        reportedCommitCount !== null &&
+        page.totalCount !== reportedCommitCount
+      ) {
+        throw new Error(
+          'GitHub changed the reported commit count during pagination. The action will fail closed.'
+        )
+      }
+      reportedCommitCount = page.totalCount
+      observedCommitCount += page.edges.length
       for (const edge of page.edges) {
         const commit = edge.node.commit
         if (commit.authors.pageInfo.hasNextPage) {
@@ -160,6 +189,13 @@ export default async function getCommitters(): Promise<Committer[]> {
           )
         }
 
+        identityAssertionCount += commit.authors.nodes.length + 1
+        if (identityAssertionCount > MAX_GIT_IDENTITY_ASSERTIONS) {
+          throw new Error(
+            `A Pull Request reports more than ${MAX_GIT_IDENTITY_ASSERTIONS} git identity assertions. The action will fail closed.`
+          )
+        }
+
         addActor(commit.author, 'primaryAuthor')
         commit.authors.nodes
           .slice(1)
@@ -167,8 +203,27 @@ export default async function getCommitters(): Promise<Committer[]> {
         addActor(commit.committer, 'committer')
       }
 
-      cursor = page.pageInfo.endCursor
       hasNextPage = page.pageInfo.hasNextPage
+      if (hasNextPage) {
+        const nextCursor = page.pageInfo.endCursor
+        if (!nextCursor || seenCursors.has(nextCursor)) {
+          throw new Error(
+            'GitHub returned invalid commit pagination. The action will fail closed.'
+          )
+        }
+        seenCursors.add(nextCursor)
+        cursor = nextCursor
+      }
+    }
+
+    if (
+      observedCommitCount === 0 ||
+      observedCommitCount > MAX_PULL_REQUEST_COMMITS ||
+      observedCommitCount !== reportedCommitCount
+    ) {
+      throw new Error(
+        `A Pull Request reports no commits, incomplete pagination, or more than ${MAX_PULL_REQUEST_COMMITS} commits. The action will fail closed.`
+      )
     }
 
     return [...committers.values()]

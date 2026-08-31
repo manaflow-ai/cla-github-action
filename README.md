@@ -131,7 +131,9 @@ CLA action workflow will be triggered on all Pull Request `opened, closed, edite
 The action fails closed for every unlinked committer, including metadata that claims to be `GitHub <noreply@github.com>` or `web-flow`. Git names and email addresses are not authenticated and can be forged. `allowlist-ids` cannot match an unresolved identity.
 
 GitHub can map an author, co-author, or committer email to an account ID, but this mapping does not authenticate authorship. Every non-opener identity from git metadata must post the exact declaration on the current Pull Request. A stored signature is reusable only for the account authenticated by the live Pull Request API as the opener. A committer-only match does not satisfy the opener author/co-author guard.
-<br/> When the CLA workflow is triggered on pull request `closed` event and the Pull Request was merged, it will lock the Pull Request conversation so that the contributors cannot modify or delete the signatures (Pull Request comment) later. This feature is optional. On a `reopened` event, the action removes a conversation lock it left behind (older versions locked Pull Requests that were closed without merging), so the CLA check can comment again.
+<br/> When the CLA workflow is triggered on pull request `closed` event and the Pull Request was merged, it will lock the Pull Request conversation so that the contributors cannot modify or delete the signatures (Pull Request comment) later. This feature is optional. The action never removes a conversation lock. A maintainer must unlock a reopened Pull Request before contributors can sign.
+
+The action fails closed when a Pull Request has more than 1,000 commits or more than 1,000 git identity assertions. These limits bound work on untrusted Pull Request data. Split a larger contribution before running the CLA check.
 
 #### 3. Signing the CLA
 
