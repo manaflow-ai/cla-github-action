@@ -3,8 +3,19 @@ import { resetEnv, setInput } from '../testHelpers/env'
 import { checkAllowList } from '../../src/checkAllowList'
 import { Committer } from '../../src/interfaces'
 
-function committer(name: string, id: number, email?: string): Committer {
-  return { name, id, pullRequestNo: 1, ...(email ? { email } : {}) }
+function committer(
+  name: string,
+  id: number,
+  email?: string,
+  isPullRequestOpener = false
+): Committer {
+  return {
+    name,
+    id,
+    pullRequestNo: 1,
+    ...(email ? { email } : {}),
+    isPullRequestOpener
+  }
 }
 
 describe('checkAllowList', () => {
@@ -13,14 +24,14 @@ describe('checkAllowList', () => {
     resetEnv()
   })
 
-  it('exempts only verified numeric GitHub IDs', () => {
+  it('exempts only the authenticated live opener with a configured ID', () => {
     setInput('allowlist-ids', '1001, 2002')
     const result = checkAllowList([
-      committer('alice', 1001),
+      committer('alice', 1001, undefined, true),
       committer('bob', 2002),
       committer('carol', 3003)
     ])
-    expect(result.map(c => c.name)).toEqual(['carol'])
+    expect(result.map(c => c.name)).toEqual(['bob', 'carol'])
   })
 
   it('does not exempt a matching raw login or email from the deprecated allowlist', () => {
@@ -42,7 +53,7 @@ describe('checkAllowList', () => {
     const warning = jest.spyOn(core, 'warning').mockImplementation(() => {})
     setInput('allowlist-ids', '1001,bob,0,-2,3.5')
     const result = checkAllowList([
-      committer('alice', 1001),
+      committer('alice', 1001, undefined, true),
       committer('bob', 2002)
     ])
 

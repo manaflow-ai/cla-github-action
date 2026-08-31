@@ -29,6 +29,8 @@ export interface PullRequest {
   head: {
     sha: string
     ref: string
+    /** REST API head ref; defaults to the context helper's feature/test. */
+    apiRef?: string
     repoFullName?: string
     repoId?: number
   }
@@ -277,7 +279,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       number: pr.number,
       head: {
         sha: pr.head.sha,
-        ref: pr.head.ref,
+        ref: pr.head.apiRef || 'feature/test',
         repo: {
           full_name: pr.head.repoFullName || `${owner}/${name}`,
           id: pr.head.repoId || repository.id

@@ -118,8 +118,21 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
       pull_request: {
         number: 7,
         state: 'open',
-        head: { sha: 'headsha' },
-        base: { ref: 'main', repo: { full_name: 'acme/widgets' } }
+        head: {
+          sha: 'headsha',
+          ref: 'feature/test',
+          repo: {
+            id: fake.repo('acme', 'widgets').state.id,
+            full_name: 'acme/widgets'
+          }
+        },
+        base: {
+          ref: 'main',
+          repo: {
+            id: fake.repo('acme', 'widgets').state.id,
+            full_name: 'acme/widgets'
+          }
+        }
       },
       repository: {
         id: fake.repo('acme', 'widgets').state.id,

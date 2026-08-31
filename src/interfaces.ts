@@ -7,11 +7,11 @@ export interface Committer {
   id: number
   pullRequestNo?: number | undefined
   /**
-   * True when an identity appears in a Co-authored-by trailer, or appears
-   * only as a committer. These fields are assertions in attacker-controlled
-   * git data. A stored signature from another PR must not satisfy this
-   * identity; the named account must post the exact signature on the current
-   * PR.
+   * True for identities that come from git author, co-author, or committer
+   * metadata. GitHub can map these fields to an account by email, but that
+   * does not authenticate who made the commit. A stored signature from
+   * another PR must not satisfy this identity unless the same account is the
+   * authenticated live PR opener.
    */
   requiresCurrentSignature?: boolean | undefined
   /** GitHub returned this identity as the primary author of a commit. */
@@ -20,6 +20,8 @@ export interface Committer {
   isCoAuthor?: boolean | undefined
   /** GitHub returned this identity as the git committer of a commit. */
   isCommitter?: boolean | undefined
+  /** The live Pull Request API authenticated this identity as the opener. */
+  isPullRequestOpener?: boolean | undefined
   /**
    * Commit-author email. Present only when the GraphQL lookup could not map
    * the commit to a GitHub user (i.e. when this committer ends up in

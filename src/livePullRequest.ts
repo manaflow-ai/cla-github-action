@@ -4,8 +4,12 @@ import { getRequiredBaseRef } from './shared/getInputs'
 
 export interface LivePullRequestSnapshot {
   headSha: string
+  headRef: string
+  headRepository: string
+  headRepositoryId: number
   baseRef: string
   baseRepository: string
+  baseRepositoryId: number
   opener: { id: number; login: string }
 }
 
@@ -25,7 +29,7 @@ export async function validateLivePullRequest(
   expected?: LivePullRequestSnapshot
 ): Promise<LivePullRequestSnapshot> {
   const repository = `${context.repo.owner}/${context.repo.repo}`
-  validateEvent(repository)
+  const repositoryId = validateEvent(repository)
 
   const response = await octokit.rest.pulls.get({
     owner: context.repo.owner,
@@ -34,6 +38,9 @@ export async function validateLivePullRequest(
   })
   const pullRequest = response.data
   const liveRepository = pullRequest.base.repo?.full_name
+  const liveRepositoryId = pullRequest.base.repo?.id
+  const liveHeadRepository = pullRequest.head.repo?.full_name
+  const liveHeadRepositoryId = pullRequest.head.repo?.id
   const requiredBaseRef = getRequiredBaseRef()
   const opener = pullRequest.user
 
@@ -47,9 +54,28 @@ export async function validateLivePullRequest(
       `Live Pull Request base repository is not ${repository}; refusing a CLA signature write`
     )
   }
+  if (
+    !Number.isSafeInteger(liveRepositoryId) ||
+    liveRepositoryId !== repositoryId
+  ) {
+    throw new Error(
+      'Live Pull Request base repository ID does not match the event repository; refusing a CLA signature write'
+    )
+  }
   if (pullRequest.base.ref !== requiredBaseRef) {
     throw new Error(
       `Live Pull Request base branch is '${pullRequest.base.ref}', not '${requiredBaseRef}'; refusing a CLA signature write`
+    )
+  }
+  if (
+    !pullRequest.head.sha?.trim() ||
+    !pullRequest.head.ref?.trim() ||
+    !liveHeadRepository?.trim() ||
+    !Number.isSafeInteger(liveHeadRepositoryId) ||
+    Number(liveHeadRepositoryId) <= 0
+  ) {
+    throw new Error(
+      'Live Pull Request head has no complete repository identity; refusing a CLA signature write'
     )
   }
   if (
@@ -65,16 +91,25 @@ export async function validateLivePullRequest(
 
   const snapshot: LivePullRequestSnapshot = {
     headSha: pullRequest.head.sha,
+    headRef: pullRequest.head.ref,
+    headRepository: liveHeadRepository,
+    headRepositoryId: Number(liveHeadRepositoryId),
     baseRef: pullRequest.base.ref,
     baseRepository: liveRepository,
+    baseRepositoryId: Number(liveRepositoryId),
     opener: { id: opener.id, login: opener.login }
   }
   if (
     expected &&
     (snapshot.headSha !== expected.headSha ||
+      snapshot.headRef !== expected.headRef ||
+      snapshot.headRepository.toLowerCase() !==
+        expected.headRepository.toLowerCase() ||
+      snapshot.headRepositoryId !== expected.headRepositoryId ||
       snapshot.baseRef !== expected.baseRef ||
       snapshot.baseRepository.toLowerCase() !==
         expected.baseRepository.toLowerCase() ||
+      snapshot.baseRepositoryId !== expected.baseRepositoryId ||
       snapshot.opener.id !== expected.opener.id ||
       snapshot.opener.login.toLowerCase() !==
         expected.opener.login.toLowerCase())
@@ -88,11 +123,14 @@ export async function validateLivePullRequest(
   return snapshot
 }
 
-function validateEvent(repository: string): void {
+function validateEvent(repository: string): number {
   const payloadRepository = context.payload.repository?.full_name
+  const payloadRepositoryId = context.payload.repository?.id
   if (
     typeof payloadRepository !== 'string' ||
-    payloadRepository.toLowerCase() !== repository.toLowerCase()
+    payloadRepository.toLowerCase() !== repository.toLowerCase() ||
+    !Number.isSafeInteger(payloadRepositoryId) ||
+    Number(payloadRepositoryId) <= 0
   ) {
     throw new Error(
       `Event repository does not match ${repository}; refusing CLA processing`
@@ -111,7 +149,7 @@ function validateEvent(repository: string): void {
         'issue_comment event is not a new comment on this open Pull Request'
       )
     }
-    return
+    return Number(payloadRepositoryId)
   }
 
   if (context.eventName === 'pull_request_target') {
@@ -126,7 +164,7 @@ function validateEvent(repository: string): void {
         'pull_request_target event is not an allowed transition for this open Pull Request'
       )
     }
-    return
+    return Number(payloadRepositoryId)
   }
 
   throw new Error(
@@ -142,8 +180,14 @@ function validatePayloadAgainstLive(
   const pullRequest = context.payload.pull_request
   if (
     pullRequest?.head?.sha !== live.headSha ||
+    pullRequest.head.ref !== live.headRef ||
+    pullRequest.head.repo?.full_name?.toLowerCase() !==
+      live.headRepository.toLowerCase() ||
+    pullRequest.head.repo?.id !== live.headRepositoryId ||
     pullRequest.base?.ref !== live.baseRef ||
-    pullRequest.base.repo?.full_name?.toLowerCase() !== repository.toLowerCase()
+    pullRequest.base.repo?.full_name?.toLowerCase() !==
+      repository.toLowerCase() ||
+    pullRequest.base.repo?.id !== live.baseRepositoryId
   ) {
     throw new Error(
       'pull_request_target payload does not match the live Pull Request identity'

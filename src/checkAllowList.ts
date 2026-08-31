@@ -3,15 +3,16 @@ import { Committer } from './interfaces'
 import * as input from './shared/getInputs'
 
 /**
- * Remove only identities whose GitHub database ID is explicitly configured.
- * Names and emails come from git metadata and are attacker-controlled, so the
- * legacy name/glob allowlist is ignored.
+ * Exempt only the identity authenticated by the live Pull Request API as the
+ * opener, and only when its database ID is explicitly configured. GitHub may
+ * map forgeable commit emails to account IDs, so a commit-derived ID alone is
+ * never enough for an exemption.
  */
 export function checkAllowList(committers: Committer[]): Committer[] {
   const legacy = input.getAllowListItem().trim()
   if (legacy) {
     core.warning(
-      "The deprecated 'allowlist' input is ignored because names, emails, and globs can be spoofed in commit metadata. Use 'allowlist-ids' with numeric GitHub user IDs."
+      "The deprecated 'allowlist' input is ignored because names, emails, and globs can be spoofed in commit metadata. Use 'allowlist-ids' only for authenticated Pull Request opener IDs."
     )
   }
 
@@ -23,7 +24,13 @@ export function checkAllowList(committers: Committer[]): Committer[] {
   }
 
   return committers.filter(
-    committer => committer && !(committer.id > 0 && ids.has(committer.id))
+    committer =>
+      committer &&
+      !(
+        committer.isPullRequestOpener &&
+        committer.id > 0 &&
+        ids.has(committer.id)
+      )
   )
 }
 

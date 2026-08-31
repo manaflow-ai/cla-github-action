@@ -48126,20 +48126,24 @@ function getInputs_getBooleanInput(name, fallback = false) {
 
 
 /**
- * Remove only identities whose GitHub database ID is explicitly configured.
- * Names and emails come from git metadata and are attacker-controlled, so the
- * legacy name/glob allowlist is ignored.
+ * Exempt only the identity authenticated by the live Pull Request API as the
+ * opener, and only when its database ID is explicitly configured. GitHub may
+ * map forgeable commit emails to account IDs, so a commit-derived ID alone is
+ * never enough for an exemption.
  */
 function checkAllowList(committers) {
     const legacy = getAllowListItem().trim();
     if (legacy) {
-        warning("The deprecated 'allowlist' input is ignored because names, emails, and globs can be spoofed in commit metadata. Use 'allowlist-ids' with numeric GitHub user IDs.");
+        warning("The deprecated 'allowlist' input is ignored because names, emails, and globs can be spoofed in commit metadata. Use 'allowlist-ids' only for authenticated Pull Request opener IDs.");
     }
     const { ids, invalid } = parseAllowListIds(getAllowListIds());
     if (invalid.length > 0) {
         warning(`Invalid allowlist-ids entries were ignored: ${invalid.join(', ')}`);
     }
-    return committers.filter(committer => committer && !(committer.id > 0 && ids.has(committer.id)));
+    return committers.filter(committer => committer &&
+        !(committer.isPullRequestOpener &&
+            committer.id > 0 &&
+            ids.has(committer.id)));
 }
 function parseAllowListIds(value) {
     const ids = new Set();
@@ -48275,9 +48279,11 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
 /**
  * GitHub's Commit.authors connection is the identity source for the primary
  * author and Co-authored-by trailers. GitHub documents that the primary git
- * author is always first. Trailer-derived and committer-only actors remain
- * assertions, so callers require a current-PR signature for them. Committer
- * metadata does not qualify an opener for the author/co-author guard.
+ * author is always first. Every actor in git metadata remains an assertion,
+ * even when GitHub maps its email to an account. Callers require a current-PR
+ * signature unless the live Pull Request API independently authenticates the
+ * same account as the opener. Committer metadata does not qualify an opener
+ * for the author/co-author guard.
  */
 async function getCommitters() {
     try {
@@ -48286,7 +48292,8 @@ async function getCommitters() {
             const roles = {
                 isPrimaryAuthor: role === 'primaryAuthor',
                 isCoAuthor: role === 'coAuthor',
-                isCommitter: role === 'committer'
+                isCommitter: role === 'committer',
+                requiresCurrentSignature: true
             };
             if (!actor) {
                 addCommitter(committers, {
@@ -48351,23 +48358,17 @@ function addCommitter(committers, incoming) {
     const key = identityKey(incoming);
     const current = committers.get(key);
     if (!current) {
-        incoming.requiresCurrentSignature = requiresCurrentSignature(incoming);
         committers.set(key, incoming);
         return;
     }
     current.isPrimaryAuthor = Boolean(current.isPrimaryAuthor || incoming.isPrimaryAuthor);
     current.isCoAuthor = Boolean(current.isCoAuthor || incoming.isCoAuthor);
     current.isCommitter = Boolean(current.isCommitter || incoming.isCommitter);
-    // A co-author trailer remains strict after every merge. A committer-only
-    // identity is also metadata and must sign the current PR. When the same
-    // identity is a primary author, its committer role adds no separate person.
-    current.requiresCurrentSignature = requiresCurrentSignature(current);
+    // Every git role is attacker-controlled metadata. Dedupe must never relax
+    // the current-signature rule. The authenticated live opener is added later.
+    current.requiresCurrentSignature = Boolean(current.requiresCurrentSignature || incoming.requiresCurrentSignature);
     if (!current.email && incoming.email)
         current.email = incoming.email;
-}
-function requiresCurrentSignature(committer) {
-    return Boolean(committer.isCoAuthor ||
-        (committer.isCommitter && !committer.isPrimaryAuthor));
 }
 function identityKey(committer) {
     if (committer.id > 0)
@@ -48829,7 +48830,7 @@ const OPEN_PULL_REQUEST_TARGET_ACTIONS = new Set([
  */
 async function validateLivePullRequest(expected) {
     const repository = `${github_context.repo.owner}/${github_context.repo.repo}`;
-    validateEvent(repository);
+    const repositoryId = validateEvent(repository);
     const response = await octokit.rest.pulls.get({
         owner: github_context.repo.owner,
         repo: github_context.repo.repo,
@@ -48837,6 +48838,9 @@ async function validateLivePullRequest(expected) {
     });
     const pullRequest = response.data;
     const liveRepository = pullRequest.base.repo?.full_name;
+    const liveRepositoryId = pullRequest.base.repo?.id;
+    const liveHeadRepository = pullRequest.head.repo?.full_name;
+    const liveHeadRepositoryId = pullRequest.head.repo?.id;
     const requiredBaseRef = getRequiredBaseRef();
     const opener = pullRequest.user;
     if (pullRequest.state !== 'open') {
@@ -48845,8 +48849,19 @@ async function validateLivePullRequest(expected) {
     if (liveRepository?.toLowerCase() !== repository.toLowerCase()) {
         throw new Error(`Live Pull Request base repository is not ${repository}; refusing a CLA signature write`);
     }
+    if (!Number.isSafeInteger(liveRepositoryId) ||
+        liveRepositoryId !== repositoryId) {
+        throw new Error('Live Pull Request base repository ID does not match the event repository; refusing a CLA signature write');
+    }
     if (pullRequest.base.ref !== requiredBaseRef) {
         throw new Error(`Live Pull Request base branch is '${pullRequest.base.ref}', not '${requiredBaseRef}'; refusing a CLA signature write`);
+    }
+    if (!pullRequest.head.sha?.trim() ||
+        !pullRequest.head.ref?.trim() ||
+        !liveHeadRepository?.trim() ||
+        !Number.isSafeInteger(liveHeadRepositoryId) ||
+        Number(liveHeadRepositoryId) <= 0) {
+        throw new Error('Live Pull Request head has no complete repository identity; refusing a CLA signature write');
     }
     if (!opener ||
         !Number.isSafeInteger(opener.id) ||
@@ -48856,15 +48871,24 @@ async function validateLivePullRequest(expected) {
     }
     const snapshot = {
         headSha: pullRequest.head.sha,
+        headRef: pullRequest.head.ref,
+        headRepository: liveHeadRepository,
+        headRepositoryId: Number(liveHeadRepositoryId),
         baseRef: pullRequest.base.ref,
         baseRepository: liveRepository,
+        baseRepositoryId: Number(liveRepositoryId),
         opener: { id: opener.id, login: opener.login }
     };
     if (expected &&
         (snapshot.headSha !== expected.headSha ||
+            snapshot.headRef !== expected.headRef ||
+            snapshot.headRepository.toLowerCase() !==
+                expected.headRepository.toLowerCase() ||
+            snapshot.headRepositoryId !== expected.headRepositoryId ||
             snapshot.baseRef !== expected.baseRef ||
             snapshot.baseRepository.toLowerCase() !==
                 expected.baseRepository.toLowerCase() ||
+            snapshot.baseRepositoryId !== expected.baseRepositoryId ||
             snapshot.opener.id !== expected.opener.id ||
             snapshot.opener.login.toLowerCase() !==
                 expected.opener.login.toLowerCase())) {
@@ -48875,8 +48899,11 @@ async function validateLivePullRequest(expected) {
 }
 function validateEvent(repository) {
     const payloadRepository = github_context.payload.repository?.full_name;
+    const payloadRepositoryId = github_context.payload.repository?.id;
     if (typeof payloadRepository !== 'string' ||
-        payloadRepository.toLowerCase() !== repository.toLowerCase()) {
+        payloadRepository.toLowerCase() !== repository.toLowerCase() ||
+        !Number.isSafeInteger(payloadRepositoryId) ||
+        Number(payloadRepositoryId) <= 0) {
         throw new Error(`Event repository does not match ${repository}; refusing CLA processing`);
     }
     if (github_context.eventName === 'issue_comment') {
@@ -48887,7 +48914,7 @@ function validateEvent(repository) {
             issue.state !== 'open') {
             throw new Error('issue_comment event is not a new comment on this open Pull Request');
         }
-        return;
+        return Number(payloadRepositoryId);
     }
     if (github_context.eventName === 'pull_request_target') {
         const pullRequest = github_context.payload.pull_request;
@@ -48897,7 +48924,7 @@ function validateEvent(repository) {
             pullRequest.state !== 'open') {
             throw new Error('pull_request_target event is not an allowed transition for this open Pull Request');
         }
-        return;
+        return Number(payloadRepositoryId);
     }
     throw new Error(`Event '${github_context.eventName}' is not allowed to write CLA signatures`);
 }
@@ -48906,8 +48933,14 @@ function validatePayloadAgainstLive(live, repository) {
         return;
     const pullRequest = github_context.payload.pull_request;
     if (pullRequest?.head?.sha !== live.headSha ||
+        pullRequest.head.ref !== live.headRef ||
+        pullRequest.head.repo?.full_name?.toLowerCase() !==
+            live.headRepository.toLowerCase() ||
+        pullRequest.head.repo?.id !== live.headRepositoryId ||
         pullRequest.base?.ref !== live.baseRef ||
-        pullRequest.base.repo?.full_name?.toLowerCase() !== repository.toLowerCase()) {
+        pullRequest.base.repo?.full_name?.toLowerCase() !==
+            repository.toLowerCase() ||
+        pullRequest.base.repo?.id !== live.baseRepositoryId) {
         throw new Error('pull_request_target payload does not match the live Pull Request identity');
     }
 }
@@ -49047,7 +49080,8 @@ function setupClaCheck_prepareCommiterMap(committers, claFileContent) {
     return committerMap;
 }
 function hasReusableStoredSignature(committer, claFileContent) {
-    if (committer.id <= 0 || committer.requiresCurrentSignature)
+    if (committer.id <= 0 ||
+        (committer.requiresCurrentSignature && !committer.isPullRequestOpener))
         return false;
     return claFileContent.signedContributors.some(cla => committer.id === cla.id);
 }
@@ -49063,13 +49097,17 @@ const getInitialCommittersMap = () => ({
  * was authored by someone else.
  */
 function includePullRequestOpener(committers, opener) {
-    if (committers.some(c => c.id === opener.id))
+    const existing = committers.find(c => c.id === opener.id);
+    if (existing) {
+        existing.isPullRequestOpener = true;
         return committers;
+    }
     return [
         {
             name: opener.login,
             id: opener.id,
-            pullRequestNo: github_context.issue.number
+            pullRequestNo: github_context.issue.number,
+            isPullRequestOpener: true
         },
         ...committers
     ];

@@ -18,26 +18,29 @@ commit that introduced it.
   every committer. Unlinked service-looking metadata is not exempt because git
   names and email addresses can be forged. The action no longer trusts a
   numeric ID written in a raw `Co-authored-by` trailer.
-- A co-author asserted in commit text must post the exact declaration on the
-  current Pull Request. A stored signature from an earlier Pull Request cannot
-  satisfy that assertion.
-- A committer-only identity must also sign the current Pull Request. Committer
-  email metadata cannot satisfy the opener author/co-author guard because it
-  is not independently authenticated. Role-aware deduplication keeps this
-  strict rule without making a primary author sign every Pull Request again.
+- Every non-opener identity derived from git author, co-author, or committer
+  metadata must post the exact declaration on the current Pull Request.
+  GitHub's email-to-account mapping does not authenticate authorship. A stored
+  signature is reusable only for the account authenticated by the live Pull
+  Request API as the opener.
 - The deprecated name, email, and glob `allowlist` is ignored. The new
-  `allowlist-ids` input accepts only verified numeric GitHub account IDs.
+  `allowlist-ids` input can exempt only the authenticated live Pull Request
+  opener. It never exempts an identity derived only from commit metadata.
 - Signature comments must contain only the exact declaration. Appended text,
   changed case or punctuation, quotations, and bot comments do not count.
 - Existing CLA marker comments are trusted only when GitHub confirms that the
   canonical Actions bot wrote them.
-- The action checks the live Pull Request state, repository, base branch, head
-  commit, and opener before signature work, before a ledger write, and before
-  it reports success.
+- The action checks the live Pull Request state, opener, base repository ID,
+  base branch, head repository ID, head branch, and head commit before
+  signature work, before a ledger write, and before it reports success.
 - The signature ledger now rejects invalid entries and removes duplicate IDs.
 - The unsafe branch-based internal workflow rerun was removed. A repository
   must use a separate trusted rerun job that validates the Pull Request number
   and current head commit.
+- Repository workflows now use full commit SHAs for every external action,
+  explicit minimum token permissions, disabled checkout credential
+  persistence, and job timeouts. CODEOWNERS and weekly Dependabot updates
+  cover the action, npm dependencies, and workflow dependencies.
 
 ### Changed
 

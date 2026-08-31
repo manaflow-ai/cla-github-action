@@ -84,9 +84,11 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
 /**
  * GitHub's Commit.authors connection is the identity source for the primary
  * author and Co-authored-by trailers. GitHub documents that the primary git
- * author is always first. Trailer-derived and committer-only actors remain
- * assertions, so callers require a current-PR signature for them. Committer
- * metadata does not qualify an opener for the author/co-author guard.
+ * author is always first. Every actor in git metadata remains an assertion,
+ * even when GitHub maps its email to an account. Callers require a current-PR
+ * signature unless the live Pull Request API independently authenticates the
+ * same account as the opener. Committer metadata does not qualify an opener
+ * for the author/co-author guard.
  */
 export default async function getCommitters(): Promise<Committer[]> {
   try {
@@ -99,7 +101,8 @@ export default async function getCommitters(): Promise<Committer[]> {
       const roles = {
         isPrimaryAuthor: role === 'primaryAuthor',
         isCoAuthor: role === 'coAuthor',
-        isCommitter: role === 'committer'
+        isCommitter: role === 'committer',
+        requiresCurrentSignature: true
       }
       if (!actor) {
         addCommitter(committers, {
@@ -183,7 +186,6 @@ function addCommitter(
   const key = identityKey(incoming)
   const current = committers.get(key)
   if (!current) {
-    incoming.requiresCurrentSignature = requiresCurrentSignature(incoming)
     committers.set(key, incoming)
     return
   }
@@ -193,18 +195,12 @@ function addCommitter(
   )
   current.isCoAuthor = Boolean(current.isCoAuthor || incoming.isCoAuthor)
   current.isCommitter = Boolean(current.isCommitter || incoming.isCommitter)
-  // A co-author trailer remains strict after every merge. A committer-only
-  // identity is also metadata and must sign the current PR. When the same
-  // identity is a primary author, its committer role adds no separate person.
-  current.requiresCurrentSignature = requiresCurrentSignature(current)
-  if (!current.email && incoming.email) current.email = incoming.email
-}
-
-function requiresCurrentSignature(committer: Committer): boolean {
-  return Boolean(
-    committer.isCoAuthor ||
-    (committer.isCommitter && !committer.isPrimaryAuthor)
+  // Every git role is attacker-controlled metadata. Dedupe must never relax
+  // the current-signature rule. The authenticated live opener is added later.
+  current.requiresCurrentSignature = Boolean(
+    current.requiresCurrentSignature || incoming.requiresCurrentSignature
   )
+  if (!current.email && incoming.email) current.email = incoming.email
 }
 
 function identityKey(committer: Committer): string {

@@ -7,7 +7,7 @@
 > Divergences from upstream are documented in [CHANGELOG.md](./CHANGELOG.md).
 > Highlights: Node 24 runtime, current `@actions/github`, TypeScript 6 with full
 > strict mode, an in-process and subprocess test harness, GitHub-resolved commit
-> identities, strict electronic-signature matching, verified numeric-ID
+> identities, strict electronic-signature matching, authenticated opener-ID
 > exemptions, live Pull Request validation, and an opener identity guard.
 
 # Handling CLAs and DCOs via GitHub Action
@@ -64,7 +64,7 @@ jobs:
           # Initialize this branch, then restrict writes to trusted CLA automation.
           branch: 'cla-signatures'
           required-base-ref: 'main'
-          # Exempt only GitHub-resolved numeric account IDs. Names and globs are unsafe.
+          # Exempt only an authenticated PR opener with this numeric account ID.
           allowlist-ids: '49699333'
 
          # the followings are the optional inputs - If the optional inputs are not given, then default values will be taken
@@ -126,11 +126,11 @@ jobs:
 
 #### 2. Pull Request event triggers CLA Workflow
 
-CLA action workflow will be triggered on all Pull Request `opened, closed, edited, reopened, synchronize` events. This workflow will always run in the base repository and that's why we are making use of the [pull_request_target](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request_target) event. The action validates the live Pull Request repository, base branch, head commit, state, and opener before it writes signature data.
+CLA action workflow will be triggered on all Pull Request `opened, closed, edited, reopened, synchronize` events. This workflow will always run in the base repository and that's why we are making use of the [pull_request_target](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request_target) event. The action validates the live Pull Request state, opener, base repository ID, base branch, head repository ID, head branch, and head commit before it writes signature data.
 
-The action fails closed for every unlinked committer, including metadata that claims to be `GitHub <noreply@github.com>` or `web-flow`. Git names and email addresses are not authenticated and can be forged. `allowlist-ids` cannot match an unresolved identity. Amend the commit so GitHub resolves it to an authenticated account before an explicit numeric-ID exemption can apply.
+The action fails closed for every unlinked committer, including metadata that claims to be `GitHub <noreply@github.com>` or `web-flow`. Git names and email addresses are not authenticated and can be forged. `allowlist-ids` cannot match an unresolved identity.
 
-A distinct committer is also derived from unauthenticated git metadata. A stored signature from an earlier Pull Request does not satisfy a committer-only identity. That account must post the exact declaration on the current Pull Request or have an explicit verified numeric-ID exemption. A committer-only match does not satisfy the opener author/co-author guard.
+GitHub can map an author, co-author, or committer email to an account ID, but this mapping does not authenticate authorship. Every non-opener identity from git metadata must post the exact declaration on the current Pull Request. A stored signature is reusable only for the account authenticated by the live Pull Request API as the opener. A committer-only match does not satisfy the opener author/co-author guard.
 <br/> When the CLA workflow is triggered on pull request `closed` event and the Pull Request was merged, it will lock the Pull Request conversation so that the contributors cannot modify or delete the signatures (Pull Request comment) later. This feature is optional. On a `reopened` event, the action removes a conversation lock it left behind (older versions locked Pull Requests that were closed without merging), so the CLA check can comment again.
 
 #### 3. Signing the CLA
@@ -161,9 +161,9 @@ and `remote-repository-name`: `<your repo name>` in your CLA workflow file.
 
 ![signature-storage-file](https://github.com/cla-assistant/github-action/blob/master/images/signature-storage-file.gif?raw=true)
 
-#### 5. Verified account ID allowlist
+#### 5. Authenticated opener ID allowlist
 
-Use `allowlist-ids` only when a specific GitHub account must be exempt. Values are comma-separated numeric GitHub database IDs. The action compares them only with identities resolved by GitHub. The deprecated `allowlist` name, email, and glob input is ignored because commit metadata can spoof those values.
+Use `allowlist-ids` only when a specific automated Pull Request opener must be exempt. Values are comma-separated numeric GitHub database IDs. The action applies an exemption only when the live Pull Request API authenticates that ID as the opener. It never exempts an author, co-author, or committer derived only from git metadata. The deprecated `allowlist` name, email, and glob input is ignored because commit metadata can spoof those values.
 
 ##### Demo for step 5
 
@@ -194,7 +194,7 @@ This PAT should have repo scope and is only required if you have configured to s
 | `path-to-signatures`       | _optional_ |  Path to the JSON file where  all the signatures of the contributors will be stored inside the repository. | signatures/version1/cla.json |
 | `branch`   | _optional_ |  Branch in which all the signatures of the contributors will be stored and Default branch is `master`.  | master |
 | `required-base-ref`   | _optional_ | Only an open Pull Request with this live base branch can write signature data. The default is `main`. | main |
-| `allowlist-ids`   | _optional_ | Comma-separated numeric GitHub user IDs that are exempt from signing. | 49699333,29139614 |
+| `allowlist-ids`   | _optional_ | Comma-separated numeric GitHub user IDs. Only the authenticated live Pull Request opener can be exempt. Commit-derived identities are never exempt. | 49699333,29139614 |
 | `allowlist`   | _deprecated_ | Ignored. Raw names, emails, and globs are unsafe identity evidence. | |
 | `remote-repository-name`   | _optional_ | provide the remote repository name where all the signatures should be stored . | remote repository name |
 | `remote-organization-name`   | _optional_ | provide the remote organization name where all the signatures should be stored. | remote organization name |

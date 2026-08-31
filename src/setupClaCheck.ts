@@ -219,7 +219,11 @@ function hasReusableStoredSignature(
   committer: Committer,
   claFileContent: ClaFileContent
 ): boolean {
-  if (committer.id <= 0 || committer.requiresCurrentSignature) return false
+  if (
+    committer.id <= 0 ||
+    (committer.requiresCurrentSignature && !committer.isPullRequestOpener)
+  )
+    return false
   return claFileContent.signedContributors.some(cla => committer.id === cla.id)
 }
 
@@ -239,12 +243,17 @@ function includePullRequestOpener(
   committers: Committer[],
   opener: LivePullRequestSnapshot['opener']
 ): Committer[] {
-  if (committers.some(c => c.id === opener.id)) return committers
+  const existing = committers.find(c => c.id === opener.id)
+  if (existing) {
+    existing.isPullRequestOpener = true
+    return committers
+  }
   return [
     {
       name: opener.login,
       id: opener.id,
-      pullRequestNo: context.issue.number
+      pullRequestNo: context.issue.number,
+      isPullRequestOpener: true
     },
     ...committers
   ]

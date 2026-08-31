@@ -242,7 +242,10 @@ describe('CLA action end-to-end scenarios', () => {
       ]
     })
     fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
-      signedContributors: [{ name: 'alice', id: 1001 }]
+      signedContributors: [
+        { name: 'alice', id: 1001 },
+        { name: 'bob', id: 2002 }
+      ]
     })
     fake.repo('acme', 'widgets').addComment(28, {
       body: '**CLA Assistant Lite bot**: notice',
@@ -650,6 +653,14 @@ describe('CLA action end-to-end scenarios', () => {
         { name: 'bob', id: 2002 }
       ]
     })
+    fake.repo('acme', 'widgets').addComment(16, {
+      body: '**CLA Assistant Lite bot**: notice',
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
+    })
+    fake.repo('acme', 'widgets').addComment(16, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'bob', id: 2002, type: 'User' }
+    })
 
     setContext({
       owner: 'acme',
@@ -695,6 +706,14 @@ describe('CLA action end-to-end scenarios', () => {
         { name: 'alice', id: 1001 },
         { name: 'bob', id: 2002 }
       ]
+    })
+    fake.repo('acme', 'widgets').addComment(17, {
+      body: '**CLA Assistant Lite bot**: notice',
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
+    })
+    fake.repo('acme', 'widgets').addComment(17, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'bob', id: 2002, type: 'User' }
     })
 
     setContext({
@@ -835,6 +854,10 @@ describe('CLA action end-to-end scenarios', () => {
       body: 'I have read the CLA Document and I hereby sign the CLA',
       user: { login: 'alice', id: 1001, type: 'User' }
     })
+    fake.repo('acme', 'widgets').addComment(22, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'bob', id: 2002, type: 'User' }
+    })
     setContext({
       owner: 'acme',
       repo: 'widgets',
@@ -908,7 +931,7 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('allows a maintainer cherry-pick only with the opener guard opt-out and a current committer signature', async () => {
+  it('allows a maintainer cherry-pick with the opener guard opt-out and a current non-opener signature', async () => {
     const watch = watchCore()
     setInput('require-opener-as-author', 'false')
     fake.repo('acme', 'widgets').addPullRequest({
@@ -935,6 +958,10 @@ describe('CLA action end-to-end scenarios', () => {
     fake.repo('acme', 'widgets').addComment(26, {
       body: 'I have read the CLA Document and I hereby sign the CLA',
       user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    fake.repo('acme', 'widgets').addComment(26, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'bob', id: 2002, type: 'User' }
     })
     setContext({
       owner: 'acme',
@@ -1156,7 +1183,13 @@ describe('CLA action end-to-end scenarios', () => {
         number: 27,
         state: 'open',
         head: { sha: 'headsha', ref: 'feature/retarget-during-check' },
-        base: { ref: 'release', repo: { full_name: 'acme/widgets' } },
+        base: {
+          ref: 'release',
+          repo: {
+            full_name: 'acme/widgets',
+            id: fake.repo('acme', 'widgets').state.id
+          }
+        },
         user: { login: 'alice', id: 1001 }
       })
     })
@@ -1190,6 +1223,7 @@ describe('CLA action end-to-end scenarios', () => {
       head: {
         sha: 'headsha',
         ref: 'feature/head-identity',
+        apiRef: 'feature/head-identity',
         repoFullName: 'alice/widgets-fork',
         repoId: 9001
       },
