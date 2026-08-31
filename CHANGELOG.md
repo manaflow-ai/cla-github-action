@@ -51,8 +51,10 @@ commit that introduced it.
   of reporting success with an unlocked signature comment.
 - Pull Requests with more than 1,000 comments and signature ledgers with more
   than 10,000 entries or 1,000,000 bytes fail closed before a read or write.
-- A closed event is re-fetched and matched by repository IDs, refs, head SHA,
-  opener, state, and merge result before the action locks the conversation.
+- A closed event is re-fetched and matched by immutable base repository ID,
+  base branch, opener, state, and merge result before the action locks the
+  conversation. A valid live head is still required, but a source branch
+  advance or repository deletion after merge does not prevent locking.
 - The new `required-base-ref` input has an empty compatibility default, which
   preserves upstream behavior. Protected deployments must set it explicitly.
 - GitHub API failures fail the current run without automatic request replay.

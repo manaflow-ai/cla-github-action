@@ -49091,9 +49091,10 @@ async function validateLivePullRequest(expected) {
 }
 /**
  * Re-fetch and authenticate a closed merged Pull Request before the action
- * locks its conversation. A pull_request_target payload is trusted only when
- * its full repository, ref, commit, opener, state, and merge identity match
- * the live Pull Request API response.
+ * locks its conversation. The immutable base repository, base branch, opener,
+ * state, and merge identity must match the event. A merged Pull Request's
+ * source branch can advance or be deleted before this job runs, so its live
+ * head must be structurally valid but does not have to match the event head.
  */
 async function validateMergedPullRequestForLock() {
     const repository = `${github_context.repo.owner}/${github_context.repo.repo}`;
@@ -49117,28 +49118,27 @@ async function validateMergedPullRequestForLock() {
     const liveBaseRepository = pullRequest.base.repo;
     const liveHeadRepository = pullRequest.head.repo;
     const opener = pullRequest.user;
-    if (pullRequest.state !== 'closed' ||
+    const hasValidLiveHeadRepository = liveHeadRepository === null ||
+        Boolean(liveHeadRepository?.full_name?.trim() &&
+            Number.isSafeInteger(liveHeadRepository.id) &&
+            liveHeadRepository.id > 0);
+    if (pullRequest.number !== github_context.issue.number ||
+        pullRequest.state !== 'closed' ||
         pullRequest.merged !== true ||
+        !pullRequest.base.ref?.trim() ||
         (requiredBaseRef && pullRequest.base.ref !== requiredBaseRef) ||
         liveBaseRepository?.full_name?.toLowerCase() !== repository.toLowerCase() ||
         liveBaseRepository?.id !== repositoryId ||
         !pullRequest.head.sha?.trim() ||
         !pullRequest.head.ref?.trim() ||
-        !liveHeadRepository?.full_name?.trim() ||
-        !Number.isSafeInteger(liveHeadRepository?.id) ||
-        Number(liveHeadRepository?.id) <= 0 ||
+        !hasValidLiveHeadRepository ||
         !opener ||
         !Number.isSafeInteger(opener.id) ||
         opener.id <= 0 ||
         !opener.login?.trim()) {
         throw new Error('Live Pull Request is not a complete closed merged Pull Request; refusing to lock');
     }
-    if (eventPullRequest.head?.sha !== pullRequest.head.sha ||
-        eventPullRequest.head.ref !== pullRequest.head.ref ||
-        eventPullRequest.head.repo?.full_name?.toLowerCase() !==
-            liveHeadRepository.full_name.toLowerCase() ||
-        eventPullRequest.head.repo?.id !== liveHeadRepository.id ||
-        eventPullRequest.base?.ref !== pullRequest.base.ref ||
+    if (eventPullRequest.base?.ref !== pullRequest.base.ref ||
         eventPullRequest.base.repo?.full_name?.toLowerCase() !==
             liveBaseRepository.full_name.toLowerCase() ||
         eventPullRequest.base.repo?.id !== liveBaseRepository.id ||

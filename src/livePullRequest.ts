@@ -125,9 +125,10 @@ export async function validateLivePullRequest(
 
 /**
  * Re-fetch and authenticate a closed merged Pull Request before the action
- * locks its conversation. A pull_request_target payload is trusted only when
- * its full repository, ref, commit, opener, state, and merge identity match
- * the live Pull Request API response.
+ * locks its conversation. The immutable base repository, base branch, opener,
+ * state, and merge identity must match the event. A merged Pull Request's
+ * source branch can advance or be deleted before this job runs, so its live
+ * head must be structurally valid but does not have to match the event head.
  */
 export async function validateMergedPullRequestForLock(): Promise<void> {
   const repository = `${context.repo.owner}/${context.repo.repo}`
@@ -156,18 +157,25 @@ export async function validateMergedPullRequestForLock(): Promise<void> {
   const liveBaseRepository = pullRequest.base.repo
   const liveHeadRepository = pullRequest.head.repo
   const opener = pullRequest.user
+  const hasValidLiveHeadRepository =
+    liveHeadRepository === null ||
+    Boolean(
+      liveHeadRepository?.full_name?.trim() &&
+      Number.isSafeInteger(liveHeadRepository.id) &&
+      liveHeadRepository.id > 0
+    )
 
   if (
+    pullRequest.number !== context.issue.number ||
     pullRequest.state !== 'closed' ||
     pullRequest.merged !== true ||
+    !pullRequest.base.ref?.trim() ||
     (requiredBaseRef && pullRequest.base.ref !== requiredBaseRef) ||
     liveBaseRepository?.full_name?.toLowerCase() !== repository.toLowerCase() ||
     liveBaseRepository?.id !== repositoryId ||
     !pullRequest.head.sha?.trim() ||
     !pullRequest.head.ref?.trim() ||
-    !liveHeadRepository?.full_name?.trim() ||
-    !Number.isSafeInteger(liveHeadRepository?.id) ||
-    Number(liveHeadRepository?.id) <= 0 ||
+    !hasValidLiveHeadRepository ||
     !opener ||
     !Number.isSafeInteger(opener.id) ||
     opener.id <= 0 ||
@@ -179,11 +187,6 @@ export async function validateMergedPullRequestForLock(): Promise<void> {
   }
 
   if (
-    eventPullRequest.head?.sha !== pullRequest.head.sha ||
-    eventPullRequest.head.ref !== pullRequest.head.ref ||
-    eventPullRequest.head.repo?.full_name?.toLowerCase() !==
-      liveHeadRepository.full_name.toLowerCase() ||
-    eventPullRequest.head.repo?.id !== liveHeadRepository.id ||
     eventPullRequest.base?.ref !== pullRequest.base.ref ||
     eventPullRequest.base.repo?.full_name?.toLowerCase() !==
       liveBaseRepository.full_name.toLowerCase() ||
