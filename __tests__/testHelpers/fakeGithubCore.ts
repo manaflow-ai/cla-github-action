@@ -26,8 +26,13 @@ export interface GitActorFixture {
 
 export interface PullRequest {
   number: number
-  head: { sha: string; ref: string }
-  base?: { ref: string; repoFullName: string }
+  head: {
+    sha: string
+    ref: string
+    repoFullName?: string
+    repoId?: number
+  }
+  base?: { ref: string; repoFullName: string; repoId?: number }
   user?: GitActorFixture
   merged?: boolean
   state?: 'open' | 'closed'
@@ -265,14 +270,25 @@ export function createFakeGitHubCore(): FakeGitHubCore {
     const owner = decodeURIComponent(m[1]!)
     const name = decodeURIComponent(m[2]!)
     const num = parseInt(m[3]!, 10)
-    const pr = getRepo(owner, name).pulls.get(num)
+    const repository = getRepo(owner, name)
+    const pr = repository.pulls.get(num)
     if (!pr) return notFound()
     return json(200, {
       number: pr.number,
-      head: pr.head,
+      head: {
+        sha: pr.head.sha,
+        ref: pr.head.ref,
+        repo: {
+          full_name: pr.head.repoFullName || `${owner}/${name}`,
+          id: pr.head.repoId || repository.id
+        }
+      },
       base: {
         ref: pr.base?.ref || 'main',
-        repo: { full_name: pr.base?.repoFullName || `${owner}/${name}` }
+        repo: {
+          full_name: pr.base?.repoFullName || `${owner}/${name}`,
+          id: pr.base?.repoId || repository.id
+        }
       },
       user: (() => {
         const user = pr.user || pr.commits[0]?.author

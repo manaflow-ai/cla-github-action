@@ -227,6 +227,59 @@ describe('CLA action end-to-end scenarios', () => {
     expect(sigFile.signedContributors).toEqual([])
   })
 
+  it('does not exempt an allowlisted ID unless it is the authenticated live opener', async () => {
+    const watch = watchCore()
+    setInput('allowlist-ids', '2002')
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 28,
+      head: { sha: 'headsha', ref: 'feature/forged-allowlist' },
+      user: { login: 'alice', id: 1001 },
+      commits: [
+        {
+          author: { login: 'bob', id: 2002 },
+          coAuthors: [{ login: 'alice', id: 1001 }]
+        }
+      ]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    fake.repo('acme', 'widgets').addComment(28, {
+      body: '**CLA Assistant Lite bot**: notice',
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
+    })
+    fake.repo('acme', 'widgets').addComment(28, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 28,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 28,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /Committers of Pull Request number 28/
+    )
+    expect(fake.repo('acme', 'widgets').listComments(28)[0]!.body).toContain(
+      ':x: @bob'
+    )
+    watch.restore()
+  })
+
   it('Merged PR: lock endpoint is called when lock-pullrequest-aftermerge is true', async () => {
     setInput('lock-pullrequest-aftermerge', 'true')
 
@@ -1072,6 +1125,53 @@ describe('CLA action end-to-end scenarios', () => {
     await runAction()
 
     expect(watch.failures.join('\n')).toMatch(/base branch.*main/i)
+    watch.restore()
+  })
+
+  it('rejects a pull_request_target payload with a different head repository identity', async () => {
+    const watch = watchCore()
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 29,
+      head: {
+        sha: 'headsha',
+        ref: 'feature/head-identity',
+        repoFullName: 'alice/widgets-fork',
+        repoId: 9001
+      },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 29,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          number: 29,
+          state: 'open',
+          user: { login: 'alice', id: 1001 },
+          head: {
+            sha: 'headsha',
+            ref: 'feature/head-identity',
+            repo: { full_name: 'mallory/widgets-fork', id: 9002 }
+          }
+        },
+        repository: { id: fake.repo('acme', 'widgets').state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /payload does not match the live Pull Request identity/i
+    )
+    expect(fake.repo('acme', 'widgets').listComments(29)).toHaveLength(0)
     watch.restore()
   })
 })

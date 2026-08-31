@@ -35,12 +35,22 @@ export function setContext(overrides: Partial<TestContext> = {}): TestContext {
       number: ctx.issueNumber,
       state: 'open',
       ...pullRequest,
-      head: { sha: 'headsha', ...(pullRequest.head || {}) },
+      head: {
+        sha: 'headsha',
+        ref: 'feature/test',
+        ...(pullRequest.head || {}),
+        repo: {
+          full_name: `${ctx.owner}/${ctx.repo}`,
+          id: payload.repository.id,
+          ...(pullRequest.head?.repo || {})
+        }
+      },
       base: {
         ref: 'main',
         ...(pullRequest.base || {}),
         repo: {
           full_name: `${ctx.owner}/${ctx.repo}`,
+          id: payload.repository.id,
           ...(pullRequest.base?.repo || {})
         }
       }
