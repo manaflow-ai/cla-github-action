@@ -76,8 +76,9 @@ jobs:
         uses: manaflow-ai/cla-github-action@49f01032e93ef115a238cd55ab9171ee3bd02435
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # the below token should have repo scope and must be manually added by you in the repository's secret
-          # This token is required only if you have configured to store the signatures in a remote repository/organization
+          # Only set this token for a remote signature repository. Prefer a
+          # fine-grained token limited to that repository with Contents read
+          # and write access.
           # PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         with:
           path-to-signatures: 'signatures/version1/cla.json'
@@ -214,8 +215,7 @@ Use `allowlist-ids` only when a specific automated Pull Request opener must be e
 
 #### 6. Adding Personal Access Token as a Secret
 
-You have to create a [Repository Secret](https://docs.github.com/en/actions/security-guides/encrypted-secrets#creating-encrypted-secrets-for-a-repository) with the name `PERSONAL_ACCESS_TOKEN`.
-For a remote signature repository, prefer a fine-grained token scoped only to that repository with Contents read and write access. A classic `repo` token is broader than necessary and should be used only when the target cannot use a fine-grained token.
+Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current repository. For a remote signature repository, create a [repository secret](https://docs.github.com/en/actions/security-guides/encrypted-secrets#creating-encrypted-secrets-for-a-repository) with that name. Prefer a fine-grained token limited to the remote repository with Contents read and write access. A classic `repo` token is broader than necessary and should be used only when the target cannot use a fine-grained token.
 
 ##### Demo for step 6
 
@@ -227,7 +227,7 @@ For a remote signature repository, prefer a fine-grained token scoped only to th
 | Name                  | Requirement | Description |
 | --------------------- | ----------- | ----------- |
 | `GITHUB_TOKEN`        | _required_ | Usage: `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}`,  CLA Action uses this in-built GitHub token to make the API calls for interacting with GitHub. It is built into Github Actions and does not need to be manually specified in your secrets store. [More Info](https://help.github.com/en/actions/configuring-and-managing-workflows/authenticating-with-the-github_token)|
-| `PERSONAL_ACCESS_TOKEN`        | _required_ | Usage: `PERSONAL_ACCESS_TOKEN : ${{ secrets.PERSONAL_ACCESS_TOKEN}}`, you have to create a [Personal Access Token](https://docs.github.com/en/github/authenticating-to-github/creating-a-personal-access-token) with `repo scope` and store in the repository's [secrets](https://docs.github.com/en/actions/configuring-and-managing-workflows/creating-and-storing-encrypted-secrets). |
+| `PERSONAL_ACCESS_TOKEN` | _optional_ | Required only for a remote signature repository. Use a fine-grained token limited to that repository with Contents read and write access, and store it as `PERSONAL_ACCESS_TOKEN`. |
 
 ### Inputs Description:
 
