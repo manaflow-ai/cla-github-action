@@ -97,7 +97,7 @@ jobs:
     steps:
       - name: "CLA Assistant v2"
         # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@6385531c505c97825190c1ee5f0212b3c6b3a4d4
+        uses: manaflow-ai/cla-github-action@91ce707cb678fe377c6788ecbf8470fa6205a969
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only set this token for a remote signature repository. Prefer a
@@ -184,8 +184,13 @@ The action re-fetches accepted signing comments immediately before a ledger writ
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: manaflow-ai/cla-github-action@6385531c505c97825190c1ee5f0212b3c6b3a4d4
+> uses: manaflow-ai/cla-github-action@91ce707cb678fe377c6788ecbf8470fa6205a969
 > ```
+>
+> Use a protected merged commit or release for enforcement. Do not pin an
+> unmerged feature branch or Pull Request head. Verify the reviewed source and
+> generated `dist/index.js` at the protected commit before making the check
+> required.
 >
 > Tools like [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot/keeping-your-actions-up-to-date-with-dependabot)
 > and [Renovate](https://docs.renovatebot.com/modules/manager/github-actions/)
