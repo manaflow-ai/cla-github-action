@@ -49,6 +49,10 @@ commit that introduced it.
   write-capable signer as `expected-base-sha` binds both jobs to the same live
   Pull Request base commit and fails closed after a base-branch advance between
   them.
+- `signer-preflight` now emits the authenticated signing comment's immutable
+  REST ID, creation timestamp, and account ID. Passing the three values to the
+  writer binds signature persistence and bot status updates to that exact
+  unedited declaration instead of another matching comment on the Pull Request.
 - `signer-preflight` now emits `signer_decision` as `authorized`,
   `unauthorized`, or `error`. Only an exact current declaration rejected by
   identity policy is `unauthorized`; live, API, schema, and pagination failures

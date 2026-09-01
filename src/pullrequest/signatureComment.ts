@@ -14,15 +14,20 @@ import {
 export default async function signatureWithPRComment(
   committerMap: CommitterMap,
   committers: Committer[],
-  preloadedComments?: PullRequestComment[]
+  preloadedComments?: PullRequestComment[],
+  expectedCommentId?: number
 ): Promise<ReactedCommitterMap> {
   const repoId = context.payload.repository?.id
   const allComments =
     preloadedComments ?? (await listBoundedPullRequestComments())
+  const signingComments =
+    expectedCommentId === undefined
+      ? allComments
+      : allComments.filter(comment => comment.id === expectedCommentId)
   const listOfPRComments: SigningComment[] = []
   const filteredListOfPRComments: SigningComment[] = []
 
-  for (const prComment of allComments) {
+  for (const prComment of signingComments) {
     if (!prComment.user) continue
     listOfPRComments.push({
       name: prComment.user.login,

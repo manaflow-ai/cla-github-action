@@ -66,6 +66,39 @@ describe('getInputs wrappers', () => {
     expect(inputs.getRequiredBaseRef()).toBe('release')
   })
 
+  it('reads a complete preflight comment identity tuple', () => {
+    setInput('expected-comment-id', '12345')
+    setInput('expected-comment-created-at', '2026-09-01T20:00:00.000Z')
+    setInput('expected-comment-author-id', '67890')
+
+    expect(inputs.getExpectedSigningComment()).toEqual({
+      id: 12345,
+      createdAt: '2026-09-01T20:00:00.000Z',
+      authorId: 67890
+    })
+  })
+
+  it.each([
+    'expected-comment-id',
+    'expected-comment-created-at',
+    'expected-comment-author-id'
+  ])('rejects a partial preflight comment identity tuple (%s)', provided => {
+    setInput(
+      provided,
+      provided === 'expected-comment-created-at' ? 'timestamp' : '1'
+    )
+    expect(() => inputs.getExpectedSigningComment()).toThrow(
+      /must be provided together/i
+    )
+  })
+
+  it('rejects malformed preflight comment identity values', () => {
+    setInput('expected-comment-id', '0')
+    setInput('expected-comment-created-at', 'timestamp')
+    setInput('expected-comment-author-id', '2')
+    expect(() => inputs.getExpectedSigningComment()).toThrow(/malformed/i)
+  })
+
   it('trims whitespace around the input value (core.getInput behaviour)', () => {
     setInput('branch', '  main  ')
     expect(inputs.getBranch()).toBe('main')

@@ -21,7 +21,11 @@ import prCommentSetup, {
   preparePrComment
 } from './pullrequest/pullRequestComment'
 import { errorMessage, errorStatus } from './shared/errors'
-import { requireOpenerAsAuthor } from './shared/getInputs'
+import {
+  getExpectedSigningComment,
+  requireOpenerAsAuthor
+} from './shared/getInputs'
+import type { ExpectedSigningComment } from './shared/getInputs'
 import {
   LivePullRequestSnapshot,
   validateLivePullRequest
@@ -40,16 +44,22 @@ import {
   listBoundedPullRequestComments,
   PullRequestComment
 } from './pullrequest/pullRequestComments'
-import { validateSigningCommentsUnchanged } from './pullrequest/signingCommentSnapshot'
+import {
+  validateExpectedSigningComment,
+  validateExpectedSigningCommentLive,
+  validateSigningCommentsUnchanged
+} from './pullrequest/signingCommentSnapshot'
 
 export async function setupClaCheck() {
   // A caller may use this output to authorize a follow-up check refresh. Keep
   // it false unless this run actually persists a newly accepted signature.
   core.setOutput('signature_recorded', false)
+  const expectedSigningComment = getExpectedSigningComment()
   const livePullRequest = await validateLivePullRequest()
   // Bound all contributor-controlled comments before any ledger or comment
   // write, then use the same snapshot throughout this action run.
   const pullRequestComments = await listBoundedPullRequestComments()
+  validateExpectedSigningComment(expectedSigningComment, pullRequestComments)
   let committerMap = getInitialCommittersMap()
 
   const commitAuthors = await getCommitters(livePullRequest.headSha)
@@ -74,7 +84,8 @@ export async function setupClaCheck() {
     committers,
     committerMap,
     livePullRequest,
-    pullRequestComments
+    pullRequestComments,
+    expectedSigningComment
   )
   // A missing ledger was created and no contributor remains after the
   // authenticated opener allowlist. The bootstrap path already published the
@@ -91,7 +102,10 @@ export async function setupClaCheck() {
     const commentPlan = await preparePrComment(
       committerMap,
       committers,
-      pullRequestComments
+      pullRequestComments,
+      true,
+      expectedSigningComment?.id,
+      () => validateExpectedSigningCommentLive(expectedSigningComment)
     )
     const reactedCommitters = commentPlan.reactedCommitters
 
@@ -99,13 +113,15 @@ export async function setupClaCheck() {
       /* pushing the recently signed  contributors to the CLA Json File */
       await validateSigningCommentsUnchanged(
         pullRequestComments,
-        reactedCommitters.newSigned
+        reactedCommitters.newSigned,
+        expectedSigningComment
       )
       await validateLivePullRequest(livePullRequest)
       await updateFile(sha, claFileContent, reactedCommitters, async () => {
         await validateSigningCommentsUnchanged(
           pullRequestComments,
-          reactedCommitters.newSigned
+          reactedCommitters.newSigned,
+          expectedSigningComment
         )
         await validateLivePullRequest(livePullRequest)
       })
@@ -145,7 +161,8 @@ async function getCLAFileContentandSHA(
   committers: Committer[],
   committerMap: CommitterMap,
   livePullRequest: LivePullRequestSnapshot,
-  pullRequestComments: PullRequestComment[]
+  pullRequestComments: PullRequestComment[],
+  expectedSigningComment?: ExpectedSigningComment
 ): Promise<void | ClafileContentAndSha> {
   let result
   try {
@@ -156,7 +173,8 @@ async function getCLAFileContentandSHA(
         committers,
         committerMap,
         livePullRequest,
-        pullRequestComments
+        pullRequestComments,
+        expectedSigningComment
       )
     } else {
       throw new Error(
@@ -245,7 +263,8 @@ async function createClaFileAndPRComment(
   committers: Committer[],
   committerMap: CommitterMap,
   livePullRequest: LivePullRequestSnapshot,
-  pullRequestComments: PullRequestComment[]
+  pullRequestComments: PullRequestComment[],
+  expectedSigningComment?: ExpectedSigningComment
 ): Promise<void | ClafileContentAndSha> {
   committerMap.notSigned = committers
   committerMap.signed = []
@@ -260,6 +279,7 @@ async function createClaFileAndPRComment(
   const initialContentBinary =
     Buffer.from(initialContentString).toString('base64')
 
+  await validateExpectedSigningCommentLive(expectedSigningComment)
   await validateLivePullRequest(livePullRequest)
   try {
     await createFile(initialContentBinary)
@@ -270,6 +290,7 @@ async function createClaFileAndPRComment(
       // signature path so this run cannot publish all-signed until any new
       // declaration is validated and persisted in the confirmed ledger.
       await validateLivePullRequest(livePullRequest)
+      await validateExpectedSigningCommentLive(expectedSigningComment)
       core.warning(
         'Another Pull Request created the CLA signature ledger concurrently. Continuing with the confirmed ledger.'
       )
@@ -280,10 +301,18 @@ async function createClaFileAndPRComment(
     )
   }
   await validateLivePullRequest(livePullRequest)
+  await validateExpectedSigningCommentLive(expectedSigningComment)
   // The first run creates an empty ledger. Keep existing declarations pending
   // until a later run can validate and persist them through the normal update
   // path. Never publish all-signed status for an empty new ledger.
-  await prCommentSetup(committerMap, committers, pullRequestComments, false)
+  await prCommentSetup(
+    committerMap,
+    committers,
+    pullRequestComments,
+    false,
+    undefined,
+    () => validateExpectedSigningCommentLive(expectedSigningComment)
+  )
   if (committers.length === 0) return
   if (committerMap.openerMismatch?.hardFail) {
     throw new Error(openerMismatchError(committerMap.openerMismatch))

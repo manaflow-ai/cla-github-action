@@ -48102,6 +48102,32 @@ const getExpectedHeadSha = () => getInput('expected-head-sha', { required: false
  * Empty means that the action uses its normal live Pull Request validation.
  */
 const getExpectedBaseSha = () => getInput('expected-base-sha', { required: false }).trim();
+/**
+ * Optional immutable comment binding supplied by a read-only signer-preflight.
+ * The three fields are a tuple: a partial tuple is never accepted. Empty means
+ * that the writer keeps its normal live comment discovery behavior.
+ */
+const getExpectedSigningComment = () => {
+    const id = getInput('expected-comment-id', { required: false }).trim();
+    const createdAt = getInput('expected-comment-created-at', { required: false })
+        .trim();
+    const authorId = getInput('expected-comment-author-id', { required: false })
+        .trim();
+    const values = [id, createdAt, authorId];
+    if (values.every(value => value === ''))
+        return undefined;
+    if (values.some(value => value === '')) {
+        throw new Error('expected-comment-id, expected-comment-created-at, and expected-comment-author-id must be provided together');
+    }
+    const parsedId = parsePositiveSafeInteger(id);
+    const parsedAuthorId = parsePositiveSafeInteger(authorId);
+    if (parsedId === undefined ||
+        parsedAuthorId === undefined ||
+        /[\r\n]/.test(createdAt)) {
+        throw new Error('Expected signer comment identity inputs are malformed');
+    }
+    return { id: parsedId, createdAt, authorId: parsedAuthorId };
+};
 const getRequiredBaseRef = () => getInput('required-base-ref', { required: false }) || 'main';
 const getAllowListItem = () => getInput('allowlist', { required: false });
 const getAllowListIds = () => getInput('allowlist-ids', { required: false });
@@ -48137,6 +48163,12 @@ function getInputs_getBooleanInput(name, fallback = false) {
     if (raw === 'false')
         return false;
     return fallback;
+}
+function parsePositiveSafeInteger(value) {
+    if (!/^[1-9][0-9]*$/.test(value))
+        return undefined;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 ;// CONCATENATED MODULE: ./src/checkAllowList.ts
@@ -48731,12 +48763,15 @@ async function listBoundedPullRequestComments() {
 
 
 
-async function signatureWithPRComment(committerMap, committers, preloadedComments) {
+async function signatureWithPRComment(committerMap, committers, preloadedComments, expectedCommentId) {
     const repoId = github_context.payload.repository?.id;
     const allComments = preloadedComments ?? (await listBoundedPullRequestComments());
+    const signingComments = expectedCommentId === undefined
+        ? allComments
+        : allComments.filter(comment => comment.id === expectedCommentId);
     const listOfPRComments = [];
     const filteredListOfPRComments = [];
-    for (const prComment of allComments) {
+    for (const prComment of signingComments) {
         if (!prComment.user)
             continue;
         listOfPRComments.push({
@@ -49013,8 +49048,8 @@ function escapeHtml(value) {
 
 const ACTIONS_BOT_LOGIN = 'github-actions[bot]';
 const STALE_BOT_COMMENT_ERROR = 'The CLA bot comment changed before this plan could be applied; recheck the Pull Request';
-async function prCommentSetup(committerMap, committers, preloadedComments, acceptSigningComments = true) {
-    const plan = await preparePrComment(committerMap, committers, preloadedComments, acceptSigningComments);
+async function prCommentSetup(committerMap, committers, preloadedComments, acceptSigningComments = true, expectedCommentId, beforeWrite) {
+    const plan = await preparePrComment(committerMap, committers, preloadedComments, acceptSigningComments, expectedCommentId, beforeWrite);
     await plan.apply();
     return plan.reactedCommitters;
 }
@@ -49023,7 +49058,7 @@ async function prCommentSetup(committerMap, committers, preloadedComments, accep
  * can validate and persist any newly accepted signatures before apply() makes
  * an all-signed claim visible on the Pull Request.
  */
-async function preparePrComment(committerMap, committers, preloadedComments, acceptSigningComments = true) {
+async function preparePrComment(committerMap, committers, preloadedComments, acceptSigningComments = true, expectedCommentId, beforeWrite) {
     const signed = committerMap?.notSigned && committerMap?.notSigned.length === 0;
     try {
         const comments = preloadedComments ?? (await listBoundedPullRequestComments());
@@ -49036,7 +49071,7 @@ async function preparePrComment(committerMap, committers, preloadedComments, acc
         // Reacted committers are contributors who have newly signed by posting
         // the Pull Request comment.
         const reactedCommitters = acceptSigningComments
-            ? await signatureWithPRComment(committerMap, committers, comments)
+            ? await signatureWithPRComment(committerMap, committers, comments, expectedCommentId)
             : { newSigned: [], onlyCommitters: [], allSignedFlag: false };
         if (acceptSigningComments && reactedCommitters.onlyCommitters) {
             reactedCommitters.allSignedFlag = prepareAllSignedCommitters(committerMap, reactedCommitters.onlyCommitters, committers);
@@ -49050,6 +49085,7 @@ async function preparePrComment(committerMap, committers, preloadedComments, acc
                 let expectedBotComment = initialBotComment;
                 if (!claBotComment) {
                     await assertBotCommentPlanCurrent(expectedBotComment);
+                    await beforeWrite?.();
                     await createComment(signed || reactedCommitters.allSignedFlag, committerMap);
                     return;
                 }
@@ -49062,10 +49098,12 @@ async function preparePrComment(committerMap, committers, preloadedComments, acc
                 if (signed) {
                     const body = commentContent(signed, committerMap);
                     await assertBotCommentPlanCurrent(expectedBotComment);
+                    await beforeWrite?.();
                     const updated = await updateComment(signed, committerMap, claBotComment);
                     expectedBotComment = mergeBotCommentSnapshot(expectedBotComment, updated, body);
                 }
                 await assertBotCommentPlanCurrent(expectedBotComment);
+                await beforeWrite?.();
                 await updateComment(reactedCommitters.allSignedFlag, committerMap, claBotComment);
             })
         };
@@ -49486,17 +49524,73 @@ function openerAuthorshipMismatchMessage(mismatch) {
 ;// CONCATENATED MODULE: ./src/pullrequest/signingCommentSnapshot.ts
 
 
+
+
 const CHANGED_SIGNING_COMMENT_ERROR = 'A signing comment changed or was deleted before the signature ledger write';
+const MISSING_EXPECTED_SIGNING_COMMENT_ERROR = 'The preflight-authenticated signing comment changed or was deleted before the signature write';
+/**
+ * Verify the immutable comment tuple returned by signer-preflight against the
+ * event payload and the current bounded REST snapshot. Numeric IDs identify
+ * the account and comment; login names are deliberately not compared because
+ * GitHub permits username changes.
+ */
+function validateExpectedSigningComment(expected, comments) {
+    if (!expected)
+        return;
+    const eventComment = github_context.payload.comment;
+    if (github_context.eventName !== 'issue_comment' ||
+        github_context.payload.action !== 'created' ||
+        !isExpectedCommentShape(eventComment) ||
+        eventComment.id !== expected.id ||
+        eventComment.body !== getPrSignComment() ||
+        eventComment.user.id !== expected.authorId ||
+        eventComment.user.type !== 'User' ||
+        eventComment.created_at !== expected.createdAt ||
+        eventComment.updated_at !== expected.createdAt) {
+        throw new Error(MISSING_EXPECTED_SIGNING_COMMENT_ERROR);
+    }
+    const matches = comments.filter(comment => comment.id === expected.id);
+    if (matches.length !== 1) {
+        throw new Error(MISSING_EXPECTED_SIGNING_COMMENT_ERROR);
+    }
+    const comment = matches[0];
+    if (!comment)
+        throw new Error(MISSING_EXPECTED_SIGNING_COMMENT_ERROR);
+    if (comment.body !== getPrSignComment() ||
+        comment.user?.id !== expected.authorId ||
+        comment.user.type !== 'User' ||
+        comment.created_at !== expected.createdAt ||
+        !isUneditedComment(comment.created_at, comment.updated_at)) {
+        throw new Error(MISSING_EXPECTED_SIGNING_COMMENT_ERROR);
+    }
+}
+function isExpectedCommentShape(value) {
+    if (!value || typeof value !== 'object')
+        return false;
+    const comment = value;
+    return (Number.isSafeInteger(comment.id) &&
+        Number(comment.id) > 0 &&
+        typeof comment.body === 'string' &&
+        typeof comment.created_at === 'string' &&
+        typeof comment.updated_at === 'string' &&
+        Number.isSafeInteger(comment.user?.id) &&
+        Number(comment.user?.id) > 0 &&
+        typeof comment.user?.type === 'string');
+}
 /**
  * Re-fetch only the bounded Pull Request comment collection before a ledger
  * write and confirm that each accepted signing comment is unchanged. The
  * action edits its own bot comment during this run, so unrelated comments are
  * intentionally excluded from the comparison.
  */
-async function validateSigningCommentsUnchanged(initialComments, acceptedSignatures) {
-    if (acceptedSignatures.length === 0)
+async function validateSigningCommentsUnchanged(initialComments, acceptedSignatures, expected) {
+    if (!expected && acceptedSignatures.length === 0)
         return;
     const currentComments = await listBoundedPullRequestComments();
+    validateExpectedSigningComment(expected, initialComments);
+    validateExpectedSigningComment(expected, currentComments);
+    if (acceptedSignatures.length === 0)
+        return;
     const initialById = indexComments(initialComments);
     const currentById = indexComments(currentComments);
     const checkedIds = new Set();
@@ -49510,6 +49604,9 @@ async function validateSigningCommentsUnchanged(initialComments, acceptedSignatu
         if (checkedIds.has(commentId))
             continue;
         checkedIds.add(commentId);
+        if (expected && commentId !== expected.id) {
+            throw new Error(CHANGED_SIGNING_COMMENT_ERROR);
+        }
         const initial = initialById.get(commentId);
         const current = currentById.get(commentId);
         if (!initial ||
@@ -49520,6 +49617,12 @@ async function validateSigningCommentsUnchanged(initialComments, acceptedSignatu
             throw new Error(CHANGED_SIGNING_COMMENT_ERROR);
         }
     }
+}
+/** Re-fetch and validate a preflight-bound comment immediately before a write. */
+async function validateExpectedSigningCommentLive(expected) {
+    if (!expected)
+        return;
+    validateExpectedSigningComment(expected, await listBoundedPullRequestComments());
 }
 function indexComments(comments) {
     return new Map(comments.map(comment => [comment.id, comment]));
@@ -49563,10 +49666,12 @@ async function setupClaCheck() {
     // A caller may use this output to authorize a follow-up check refresh. Keep
     // it false unless this run actually persists a newly accepted signature.
     setOutput('signature_recorded', false);
+    const expectedSigningComment = getExpectedSigningComment();
     const livePullRequest = await validateLivePullRequest();
     // Bound all contributor-controlled comments before any ledger or comment
     // write, then use the same snapshot throughout this action run.
     const pullRequestComments = await listBoundedPullRequestComments();
+    validateExpectedSigningComment(expectedSigningComment, pullRequestComments);
     let committerMap = getInitialCommittersMap();
     const commitAuthors = await getCommitters(livePullRequest.headSha);
     const openerMismatch = detectOpenerMismatch(commitAuthors, livePullRequest.opener);
@@ -49578,7 +49683,7 @@ async function setupClaCheck() {
         // diagnostic cannot omit the authenticated opener mismatch.
         committerMap.openerMismatch = openerMismatch;
     }
-    const claFile = await getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments);
+    const claFile = await getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments, expectedSigningComment);
     // A missing ledger was created and no contributor remains after the
     // authenticated opener allowlist. The bootstrap path already published the
     // all-signed status, so no ledger update is required.
@@ -49590,14 +49695,14 @@ async function setupClaCheck() {
         committerMap.openerMismatch = openerMismatch;
     }
     try {
-        const commentPlan = await preparePrComment(committerMap, committers, pullRequestComments);
+        const commentPlan = await preparePrComment(committerMap, committers, pullRequestComments, true, expectedSigningComment?.id, () => validateExpectedSigningCommentLive(expectedSigningComment));
         const reactedCommitters = commentPlan.reactedCommitters;
         if (reactedCommitters?.newSigned.length) {
             /* pushing the recently signed  contributors to the CLA Json File */
-            await validateSigningCommentsUnchanged(pullRequestComments, reactedCommitters.newSigned);
+            await validateSigningCommentsUnchanged(pullRequestComments, reactedCommitters.newSigned, expectedSigningComment);
             await validateLivePullRequest(livePullRequest);
             await updateFile(sha, claFileContent, reactedCommitters, async () => {
-                await validateSigningCommentsUnchanged(pullRequestComments, reactedCommitters.newSigned);
+                await validateSigningCommentsUnchanged(pullRequestComments, reactedCommitters.newSigned, expectedSigningComment);
                 await validateLivePullRequest(livePullRequest);
             });
             setOutput('signature_recorded', true);
@@ -49629,14 +49734,14 @@ async function setupClaCheck() {
         setFailed(`Could not complete the CLA check: ${errorMessage(err)}`);
     }
 }
-async function getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments) {
+async function getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments, expectedSigningComment) {
     let result;
     try {
         result = await getFileContent();
     }
     catch (error) {
         if (errorStatus(error) === 404) {
-            return createClaFileAndPRComment(committers, committerMap, livePullRequest, pullRequestComments);
+            return createClaFileAndPRComment(committers, committerMap, livePullRequest, pullRequestComments, expectedSigningComment);
         }
         else {
             throw new Error(`Could not retrieve repository contents. Status: ${errorStatus(error) ?? 'unknown'}`);
@@ -49700,7 +49805,7 @@ function setupClaCheck_isValidSignature(value) {
         Number.isSafeInteger(candidate.id) &&
         candidate.id > 0);
 }
-async function createClaFileAndPRComment(committers, committerMap, livePullRequest, pullRequestComments) {
+async function createClaFileAndPRComment(committers, committerMap, livePullRequest, pullRequestComments, expectedSigningComment) {
     committerMap.notSigned = committers;
     committerMap.signed = [];
     committers.map(committer => {
@@ -49711,6 +49816,7 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
     const initialContent = { signedContributors: [] };
     const initialContentString = JSON.stringify(initialContent, null, 3);
     const initialContentBinary = Buffer.from(initialContentString).toString('base64');
+    await validateExpectedSigningCommentLive(expectedSigningComment);
     await validateLivePullRequest(livePullRequest);
     try {
         await createFile(initialContentBinary);
@@ -49722,16 +49828,18 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
             // signature path so this run cannot publish all-signed until any new
             // declaration is validated and persisted in the confirmed ledger.
             await validateLivePullRequest(livePullRequest);
+            await validateExpectedSigningCommentLive(expectedSigningComment);
             warning('Another Pull Request created the CLA signature ledger concurrently. Continuing with the confirmed ledger.');
             return recoveredLedger;
         }
         throw new Error(`Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`);
     }
     await validateLivePullRequest(livePullRequest);
+    await validateExpectedSigningCommentLive(expectedSigningComment);
     // The first run creates an empty ledger. Keep existing declarations pending
     // until a later run can validate and persist them through the normal update
     // path. Never publish all-signed status for an empty new ledger.
-    await prCommentSetup(committerMap, committers, pullRequestComments, false);
+    await prCommentSetup(committerMap, committers, pullRequestComments, false, undefined, () => validateExpectedSigningCommentLive(expectedSigningComment));
     if (committers.length === 0)
         return;
     if (committerMap.openerMismatch?.hardFail) {
@@ -49915,6 +50023,12 @@ async function runSignerPreflight() {
         setFailed('The signing comment is not authored by an authenticated identity in the current Pull Request');
         return;
     }
+    if (!canonicalComment.user) {
+        throw new Error('The current signing comment has no authenticated author; refusing signer admission');
+    }
+    setOutput('comment_id', String(canonicalComment.id));
+    setOutput('comment_created_at', canonicalComment.created_at);
+    setOutput('comment_author_id', String(canonicalComment.user.id));
     setSignerDecision('authorized');
 }
 function readEventComment() {
@@ -49961,7 +50075,8 @@ function commentMatchesPhrase(comment, phrase) {
     return isCommentSignedByUser(comment.body, comment.user.login, comment.user.type, comment.user.id, phrase);
 }
 function findCanonicalComment(comments, eventComment) {
-    return comments.find(comment => comment.id === eventComment.id);
+    const matches = comments.filter(comment => comment.id === eventComment.id);
+    return matches.length === 1 ? matches[0] : undefined;
 }
 function sameEventComment(eventComment, canonicalComment) {
     const user = canonicalComment.user;
@@ -50002,6 +50117,9 @@ async function run() {
         setSignerDecision('error');
         setOutput('head_sha', '');
         setOutput('base_sha', '');
+        setOutput('comment_id', '');
+        setOutput('comment_created_at', '');
+        setOutput('comment_author_id', '');
         requireHttpsDocumentUrl();
         const mode = getMode();
         if (mode === 'signer-preflight') {

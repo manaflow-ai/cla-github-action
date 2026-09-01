@@ -216,6 +216,70 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it.each(['edited', 'deleted'] as const)(
+    'fails closed when the preflight-bound signing comment is %s before the writer starts',
+    async mutation => {
+      const watch = watchCore()
+      const repository = fake.repo('acme', 'widgets')
+      repository.addPullRequest({
+        number: 48,
+        head: { sha: 'headsha', ref: 'feature/comment-binding-race' },
+        user: { login: 'alice', id: 1001 },
+        commits: [{ author: { login: 'alice', id: 1001 } }]
+      })
+      repository.setFile('signatures/cla.json', {
+        signedContributors: []
+      })
+      const preflightComment = repository.addComment(48, {
+        body: 'I have read the CLA Document and I hereby sign the CLA',
+        user: { login: 'alice', id: 1001, type: 'User' }
+      })
+      setInput('expected-comment-id', String(preflightComment.id))
+      setInput('expected-comment-created-at', preflightComment.created_at)
+      setInput('expected-comment-author-id', String(preflightComment.user.id))
+      setContext({
+        owner: 'acme',
+        repo: 'widgets',
+        issueNumber: 48,
+        actor: 'alice',
+        eventName: 'issue_comment',
+        payload: {
+          action: 'created',
+          issue: { number: 48, state: 'open', pull_request: {} },
+          comment: {
+            id: preflightComment.id,
+            body: preflightComment.body,
+            user: preflightComment.user,
+            created_at: preflightComment.created_at,
+            updated_at: preflightComment.updated_at
+          },
+          repository: { id: repository.state.id, full_name: 'acme/widgets' }
+        }
+      })
+      if (mutation === 'edited') {
+        preflightComment.body = 'I no longer sign this CLA'
+        preflightComment.updated_at = '2099-01-01T00:00:00.000Z'
+      } else {
+        repository.listComments(48).splice(0, 1)
+      }
+
+      await runAction()
+
+      expect(watch.failures.join('\n')).toMatch(
+        /preflight-authenticated signing comment changed or was deleted/i
+      )
+      expect(repository.getFile('signatures/cla.json')).toEqual({
+        signedContributors: []
+      })
+      expect(
+        fake.requestLog.filter(request =>
+          ['POST', 'PUT', 'PATCH'].includes(request.method)
+        )
+      ).toEqual([])
+      watch.restore()
+    }
+  )
+
   it('records a valid signature when an untrusted comment spoofs the bot marker', async () => {
     const watch = watchCore()
     const repository = fake.repo('acme', 'widgets')

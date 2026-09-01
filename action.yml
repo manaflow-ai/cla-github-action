@@ -33,6 +33,25 @@ inputs:
       read-only signer-preflight. When set, both signer-preflight and the
       write-capable signer fail closed if the live base differs.
     default: ""
+  expected-comment-id:
+    description: >
+      Optional REST ID of the exact signing comment authenticated by a
+      preceding signer-preflight. Provide this together with
+      expected-comment-created-at and expected-comment-author-id for a
+      cross-job signer handoff. The write-capable signer fails closed when the
+      comment is missing, edited, or replaced.
+    default: ""
+  expected-comment-created-at:
+    description: >
+      Creation timestamp of the exact signing comment authenticated by
+      signer-preflight. This input is required when expected-comment-id is set.
+    default: ""
+  expected-comment-author-id:
+    description: >
+      Numeric GitHub account ID of the exact signing comment author
+      authenticated by signer-preflight. This input is required when
+      expected-comment-id is set.
+    default: ""
   allowlist:
     description: "Deprecated and ignored. Raw names, emails, and globs can be spoofed in commit metadata."
     default: ""
@@ -113,6 +132,21 @@ outputs:
       In signer-preflight mode, the exact live Pull Request base commit SHA
       observed after validation. Pass this value as 'expected-base-sha' to the
       write-capable signer so a base-branch advance between jobs fails closed.
+  comment_id:
+    description: >
+      In signer-preflight mode, the REST ID of the exact unedited signing
+      comment that was authenticated. Pass it to the writer as
+      expected-comment-id together with the other comment snapshot inputs.
+  comment_created_at:
+    description: >
+      In signer-preflight mode, the exact creation timestamp of the
+      authenticated signing comment. Pass it to the writer as
+      expected-comment-created-at.
+  comment_author_id:
+    description: >
+      In signer-preflight mode, the numeric GitHub account ID authenticated as
+      the signing comment author. Pass it to the writer as
+      expected-comment-author-id.
 runs:
   using: "node24"
   main: 'dist/index.js'
