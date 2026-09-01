@@ -16,6 +16,9 @@ export async function run() {
     setSignerDecision('error')
     core.setOutput('head_sha', '')
     core.setOutput('base_sha', '')
+    core.setOutput('comment_id', '')
+    core.setOutput('comment_created_at', '')
+    core.setOutput('comment_author_id', '')
 
     requireHttpsDocumentUrl()
 

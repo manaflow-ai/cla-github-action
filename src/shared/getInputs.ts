@@ -40,6 +40,46 @@ export const getExpectedHeadSha = (): string =>
 export const getExpectedBaseSha = (): string =>
   core.getInput('expected-base-sha', { required: false }).trim()
 
+export interface ExpectedSigningComment {
+  id: number
+  createdAt: string
+  authorId: number
+}
+
+/**
+ * Optional immutable comment binding supplied by a read-only signer-preflight.
+ * The three fields are a tuple: a partial tuple is never accepted. Empty means
+ * that the writer keeps its normal live comment discovery behavior.
+ */
+export const getExpectedSigningComment = ():
+  | ExpectedSigningComment
+  | undefined => {
+  const id = core.getInput('expected-comment-id', { required: false }).trim()
+  const createdAt = core
+    .getInput('expected-comment-created-at', { required: false })
+    .trim()
+  const authorId = core
+    .getInput('expected-comment-author-id', { required: false })
+    .trim()
+  const values = [id, createdAt, authorId]
+  if (values.every(value => value === '')) return undefined
+  if (values.some(value => value === '')) {
+    throw new Error(
+      'expected-comment-id, expected-comment-created-at, and expected-comment-author-id must be provided together'
+    )
+  }
+  const parsedId = parsePositiveSafeInteger(id)
+  const parsedAuthorId = parsePositiveSafeInteger(authorId)
+  if (
+    parsedId === undefined ||
+    parsedAuthorId === undefined ||
+    /[\r\n]/.test(createdAt)
+  ) {
+    throw new Error('Expected signer comment identity inputs are malformed')
+  }
+  return { id: parsedId, createdAt, authorId: parsedAuthorId }
+}
+
 export const getRequiredBaseRef = (): string =>
   core.getInput('required-base-ref', { required: false }) || 'main'
 
@@ -95,4 +135,10 @@ function getBooleanInput(name: string, fallback = false): boolean {
   if (raw === 'true') return true
   if (raw === 'false') return false
   return fallback
+}
+
+function parsePositiveSafeInteger(value: string): number | undefined {
+  if (!/^[1-9][0-9]*$/.test(value)) return undefined
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
 }

@@ -111,6 +111,14 @@ export async function runSignerPreflight(): Promise<void> {
     )
     return
   }
+  if (!canonicalComment.user) {
+    throw new Error(
+      'The current signing comment has no authenticated author; refusing signer admission'
+    )
+  }
+  core.setOutput('comment_id', String(canonicalComment.id))
+  core.setOutput('comment_created_at', canonicalComment.created_at)
+  core.setOutput('comment_author_id', String(canonicalComment.user.id))
   setSignerDecision('authorized')
 }
 
@@ -198,7 +206,8 @@ function findCanonicalComment(
   comments: PullRequestComment[],
   eventComment: EventComment
 ): PullRequestComment | undefined {
-  return comments.find(comment => comment.id === eventComment.id)
+  const matches = comments.filter(comment => comment.id === eventComment.id)
+  return matches.length === 1 ? matches[0] : undefined
 }
 
 function sameEventComment(

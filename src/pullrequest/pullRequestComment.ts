@@ -35,13 +35,17 @@ export default async function prCommentSetup(
   committerMap: CommitterMap,
   committers: Committer[],
   preloadedComments?: PullRequestComment[],
-  acceptSigningComments = true
+  acceptSigningComments = true,
+  expectedCommentId?: number,
+  beforeWrite?: () => Promise<void>
 ) {
   const plan = await preparePrComment(
     committerMap,
     committers,
     preloadedComments,
-    acceptSigningComments
+    acceptSigningComments,
+    expectedCommentId,
+    beforeWrite
   )
   await plan.apply()
   return plan.reactedCommitters
@@ -56,7 +60,9 @@ export async function preparePrComment(
   committerMap: CommitterMap,
   committers: Committer[],
   preloadedComments?: PullRequestComment[],
-  acceptSigningComments = true
+  acceptSigningComments = true,
+  expectedCommentId?: number,
+  beforeWrite?: () => Promise<void>
 ): Promise<PullRequestCommentPlan> {
   const signed = committerMap?.notSigned && committerMap?.notSigned.length === 0
 
@@ -75,7 +81,12 @@ export async function preparePrComment(
     // Reacted committers are contributors who have newly signed by posting
     // the Pull Request comment.
     const reactedCommitters: ReactedCommitterMap = acceptSigningComments
-      ? await signatureWithPRComment(committerMap, committers, comments)
+      ? await signatureWithPRComment(
+          committerMap,
+          committers,
+          comments,
+          expectedCommentId
+        )
       : { newSigned: [], onlyCommitters: [], allSignedFlag: false }
     if (acceptSigningComments && reactedCommitters.onlyCommitters) {
       reactedCommitters.allSignedFlag = prepareAllSignedCommitters(
@@ -98,6 +109,7 @@ export async function preparePrComment(
           let expectedBotComment = initialBotComment
           if (!claBotComment) {
             await assertBotCommentPlanCurrent(expectedBotComment)
+            await beforeWrite?.()
             await createComment(
               signed || reactedCommitters.allSignedFlag,
               committerMap
@@ -115,6 +127,7 @@ export async function preparePrComment(
           if (signed) {
             const body = commentContent(signed, committerMap)
             await assertBotCommentPlanCurrent(expectedBotComment)
+            await beforeWrite?.()
             const updated = await updateComment(
               signed,
               committerMap,
@@ -127,6 +140,7 @@ export async function preparePrComment(
             )
           }
           await assertBotCommentPlanCurrent(expectedBotComment)
+          await beforeWrite?.()
           await updateComment(
             reactedCommitters.allSignedFlag,
             committerMap,

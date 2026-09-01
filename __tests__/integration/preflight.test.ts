@@ -143,6 +143,15 @@ describe('signer-preflight mode', () => {
     expect(watch.outputs).toContainEqual(['signer_decision', 'authorized'])
     expect(watch.outputs).toContainEqual(['head_sha', 'headsha'])
     expect(watch.outputs).toContainEqual(['base_sha', 'base-sha'])
+    expect(watch.outputs).toContainEqual(['comment_id', String(comment.id)])
+    expect(watch.outputs).toContainEqual([
+      'comment_created_at',
+      comment.created_at
+    ])
+    expect(watch.outputs).toContainEqual([
+      'comment_author_id',
+      String(comment.user.id)
+    ])
     expect(watch.failures).toEqual([])
     expect(repository.listComments(7)).toHaveLength(1)
     expect(repository.getFile('signatures/cla.json')).toBeUndefined()
@@ -549,6 +558,30 @@ describe('signer-preflight mode', () => {
     )
     expect(writeRequests()).toEqual([])
     expect(comment.id).toBeGreaterThan(0)
+    watch.restore()
+  })
+
+  it('rejects duplicate live comment IDs instead of choosing an arbitrary row', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest([
+      { author: { login: 'alice', id: 1001 } }
+    ])
+    const comment = addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'alice',
+      id: 1001
+    })
+    repository.listComments(7).push({ ...comment })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).toContainEqual(['signer_decision', 'error'])
+    expect(watch.failures.join('\n')).toMatch(
+      /missing from the live pull request/i
+    )
+    expect(writeRequests()).toEqual([])
     watch.restore()
   })
 
