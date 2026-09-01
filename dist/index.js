@@ -49228,7 +49228,8 @@ const OPEN_PULL_REQUEST_TARGET_ACTIONS = new Set([
     'opened',
     'edited',
     'reopened',
-    'synchronize'
+    'synchronize',
+    'ready_for_review'
 ]);
 /**
  * Read the Pull Request from GitHub immediately before signature work. Event
