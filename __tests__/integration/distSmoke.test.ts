@@ -294,6 +294,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
 
     expect(result.code).toBe(0)
     expect(result.stdout).toMatch(/signer_authorized::true/)
+    expect(result.stdout).toMatch(/signer_decision::authorized/)
     expect(result.stdout).toMatch(/head_sha::headsha/)
     expect(result.stdout).toMatch(/base_sha::base-sha/)
     expect(repository.listComments(17)).toHaveLength(1)

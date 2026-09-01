@@ -140,6 +140,7 @@ describe('signer-preflight mode', () => {
     await runAction()
 
     expect(watch.outputs).toContainEqual(['signer_authorized', true])
+    expect(watch.outputs).toContainEqual(['signer_decision', 'authorized'])
     expect(watch.outputs).toContainEqual(['head_sha', 'headsha'])
     expect(watch.outputs).toContainEqual(['base_sha', 'base-sha'])
     expect(watch.failures).toEqual([])
@@ -169,6 +170,7 @@ describe('signer-preflight mode', () => {
     await runAction()
 
     expect(watch.outputs).toContainEqual(['signer_authorized', true])
+    expect(watch.outputs).toContainEqual(['signer_decision', 'authorized'])
     expect(watch.outputs).toContainEqual(['head_sha', 'headsha'])
 
     const livePullRequest = repository.state.pulls.get(7)!
@@ -211,6 +213,32 @@ describe('signer-preflight mode', () => {
       /live pull request head does not match expected-head-sha/i
     )
     expect(writeRequests()).toEqual([])
+    watch.restore()
+  })
+
+  it('keeps API failures in the error decision state', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest([
+      { author: { login: 'alice', id: 1001 } }
+    ])
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'alice',
+      id: 1001
+    })
+    fake.injectFailure({
+      method: 'POST',
+      pathPattern: /\/graphql$/,
+      status: 503,
+      times: 1
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_decision', 'error'])
+    expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.failures.join('\n')).toMatch(/GraphQL call/i)
     watch.restore()
   })
 
@@ -315,6 +343,7 @@ describe('signer-preflight mode', () => {
       await runAction()
 
       expect(watch.outputs).toContainEqual(['signer_authorized', true])
+      expect(watch.outputs).toContainEqual(['signer_decision', 'authorized'])
       expect(watch.failures).toEqual([])
       expect(writeRequests()).toEqual([])
       watch.restore()
@@ -372,6 +401,7 @@ describe('signer-preflight mode', () => {
       await runAction()
 
       expect(watch.outputs).toContainEqual(['signer_authorized', true])
+      expect(watch.outputs).toContainEqual(['signer_decision', 'authorized'])
       expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
       expect(watch.failures).toEqual([])
       expect(writeRequests()).toEqual([])
@@ -395,6 +425,7 @@ describe('signer-preflight mode', () => {
     await runAction()
 
     expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).toContainEqual(['signer_decision', 'unauthorized'])
     expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
     expect(watch.failures.join('\n')).toMatch(/opener @alice/i)
     expect(writeRequests()).toEqual([])
@@ -421,6 +452,7 @@ describe('signer-preflight mode', () => {
     await runAction()
 
     expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).toContainEqual(['signer_decision', 'unauthorized'])
     expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
     expect(watch.failures.join('\n')).toMatch(/opener @alice/i)
     expect(writeRequests()).toEqual([])
@@ -463,6 +495,7 @@ describe('signer-preflight mode', () => {
     await runAction()
 
     expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).toContainEqual(['signer_decision', 'unauthorized'])
     expect(watch.failures.join('\n')).toMatch(
       /not authored by an authenticated identity/i
     )
