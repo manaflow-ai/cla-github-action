@@ -43,7 +43,12 @@ export interface PullRequest {
     /** Simulate GitHub returning head.repo = null after source deletion. */
     repoDeleted?: boolean
   }
-  base?: { ref: string; repoFullName: string; repoId?: number }
+  base?: {
+    ref: string
+    repoFullName: string
+    repoId?: number
+    sha?: string
+  }
   user?: GitActorFixture
   merged?: boolean
   state?: 'open' | 'closed'
@@ -298,6 +303,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       },
       base: {
         ref: pr.base?.ref || 'main',
+        sha: pr.base?.sha || 'base-sha',
         repo: {
           full_name: pr.base?.repoFullName || `${owner}/${name}`,
           id: pr.base?.repoId || repository.id

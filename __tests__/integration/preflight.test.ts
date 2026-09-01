@@ -141,6 +141,7 @@ describe('signer-preflight mode', () => {
 
     expect(watch.outputs).toContainEqual(['signer_authorized', true])
     expect(watch.outputs).toContainEqual(['head_sha', 'headsha'])
+    expect(watch.outputs).toContainEqual(['base_sha', 'base-sha'])
     expect(watch.failures).toEqual([])
     expect(repository.listComments(7)).toHaveLength(1)
     expect(repository.getFile('signatures/cla.json')).toBeUndefined()
@@ -210,6 +211,79 @@ describe('signer-preflight mode', () => {
       /live pull request head does not match expected-head-sha/i
     )
     expect(writeRequests()).toEqual([])
+    watch.restore()
+  })
+
+  it('binds a writer run to the exact base observed by preflight', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest([
+      { author: { login: 'alice', id: 1001 } }
+    ])
+    setDefaultInputs({
+      mode: 'signer-preflight',
+      'expected-base-sha': 'base-sha'
+    })
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'alice',
+      id: 1001
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', true])
+    expect(watch.outputs).toContainEqual(['base_sha', 'base-sha'])
+
+    const livePullRequest = repository.state.pulls.get(7)!
+    livePullRequest.base = {
+      ...(livePullRequest.base || {
+        ref: 'main',
+        repoFullName: 'acme/widgets'
+      }),
+      sha: 'advanced-base-sha'
+    }
+    setDefaultInputs({
+      mode: 'sign',
+      'expected-base-sha': 'base-sha'
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /live pull request base does not match expected-base-sha/i
+    )
+    expect(writeRequests()).toEqual([])
+    watch.restore()
+  })
+
+  it('rejects a stale expected base before signer-preflight identity reads', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest([
+      { author: { login: 'alice', id: 1001 } }
+    ])
+    setDefaultInputs({
+      mode: 'signer-preflight',
+      'expected-base-sha': 'previous-base-sha'
+    })
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'alice',
+      id: 1001
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).not.toContainEqual(['base_sha', 'base-sha'])
+    expect(watch.failures.join('\n')).toMatch(
+      /live pull request base does not match expected-base-sha/i
+    )
+    expect(writeRequests()).toEqual([])
+    expect(
+      fake.requestLog.filter(request => request.path.endsWith('/graphql'))
+    ).toEqual([])
     watch.restore()
   })
 

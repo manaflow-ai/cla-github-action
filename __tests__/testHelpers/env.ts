@@ -30,6 +30,7 @@ export function setDefaultInputs(
     branch: 'main',
     'required-base-ref': 'main',
     'expected-head-sha': '',
+    'expected-base-sha': '',
     allowlist: '',
     'allowlist-ids': '',
     'remote-organization-name': '',

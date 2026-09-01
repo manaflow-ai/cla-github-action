@@ -11,6 +11,7 @@ describe('getInputs wrappers', () => {
     ['getPathToDocument', 'path-to-document'],
     ['getBranch', 'branch'],
     ['getExpectedHeadSha', 'expected-head-sha'],
+    ['getExpectedBaseSha', 'expected-base-sha'],
     ['getAllowListItem', 'allowlist'],
     ['getSignedCommitMessage', 'signed-commit-message'],
     ['getCreateFileCommitMessage', 'create-file-commit-message'],
