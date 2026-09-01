@@ -15,6 +15,7 @@ async function runAction() {
 function watchCore() {
   const failed = jest.spyOn(core, 'setFailed').mockImplementation(() => {})
   const info = jest.spyOn(core, 'info').mockImplementation(() => {})
+  const output = jest.spyOn(core, 'setOutput').mockImplementation(() => {})
   return {
     get failures() {
       return failed.mock.calls.map(c => String(c[0]))
@@ -22,9 +23,13 @@ function watchCore() {
     get infos() {
       return info.mock.calls.map(c => String(c[0]))
     },
+    get outputs() {
+      return output.mock.calls.map(c => [c[0], c[1]])
+    },
     restore() {
       failed.mockRestore()
       info.mockRestore()
+      output.mockRestore()
     }
   }
 }
@@ -82,6 +87,7 @@ describe('bug fixes', () => {
 
       // And the check should be marked failed.
       expect(watch.failures.join('\n')).toMatch(/Committers of pull request 7/)
+      expect(watch.outputs).toContainEqual(['cla_passed', false])
       watch.restore()
     })
 
@@ -320,6 +326,7 @@ describe('bug fixes', () => {
         ])
       )
       expect(watch.failures).toEqual([])
+      expect(watch.outputs).toContainEqual(['cla_passed', true])
       watch.restore()
     })
 
@@ -359,6 +366,7 @@ describe('bug fixes', () => {
         /all contributors have signed the cla/i
       )
       expect(watch.failures).toEqual([])
+      expect(watch.outputs).toContainEqual(['cla_passed', true])
       watch.restore()
     })
   })

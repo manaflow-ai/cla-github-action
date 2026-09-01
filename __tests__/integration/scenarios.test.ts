@@ -84,6 +84,7 @@ describe('CLA action end-to-end scenarios', () => {
     expect(watch.failures.join('\n')).toMatch(
       /Committers of Pull Request number 7/
     )
+    expect(watch.outputs).toContainEqual(['cla_passed', false])
     watch.restore()
   })
 
@@ -150,6 +151,7 @@ describe('CLA action end-to-end scenarios', () => {
 
     expect(fake.recordedRerunRequests).toEqual([])
     expect(watch.outputs).toContainEqual(['signature_recorded', true])
+    expect(watch.outputs).toContainEqual(['cla_passed', true])
     watch.restore()
   })
 
@@ -213,6 +215,8 @@ describe('CLA action end-to-end scenarios', () => {
       })
     ])
     expect(watch.failures.join('\n')).toMatch(/have to sign the CLA/i)
+    expect(watch.outputs).toContainEqual(['signature_recorded', true])
+    expect(watch.outputs).toContainEqual(['cla_passed', false])
     watch.restore()
   })
 
