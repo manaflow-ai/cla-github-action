@@ -48683,9 +48683,10 @@ function getPrSignComment() {
 class PullRequestCommentLimitError extends Error {
 }
 /**
- * List every Pull Request comment while bounding work on contributor-controlled
- * input. The extra page that crosses the limit is read only to prove that the
- * limit was exceeded, then the action fails closed.
+ * List processable Pull Request comments while bounding contributor input.
+ * Oversized bodies cannot equal the action's exact short declarations, so
+ * they are discarded. Malformed pages or bodies and excessive retained bytes
+ * fail closed.
  */
 async function listBoundedPullRequestComments() {
     let observed = 0;

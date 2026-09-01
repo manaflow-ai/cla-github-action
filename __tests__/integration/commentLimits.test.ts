@@ -84,6 +84,32 @@ describe('bounded Pull Request comment payloads', () => {
     expect(writeRequests(fake)).toEqual([])
   })
 
+  it('does not count skipped oversized noise toward the aggregate limit', async () => {
+    const repository = fake.repo('acme', 'widgets')
+    const body = 'x'.repeat(MAX_COMMENT_BODY_BYTES + 1)
+    for (let i = 0; i < 154; i++) {
+      repository.addComment(7, {
+        body,
+        user: { login: `noise-${i}`, id: 30_000 + i, type: 'User' }
+      })
+    }
+    const validComment = repository.addComment(7, {
+      body: SIGN_PHRASE,
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 7,
+      payload: { repository: { id: repository.state.id } }
+    })
+
+    const comments = await listComments()
+
+    expect(comments.map(comment => comment.id)).toEqual([validComment.id])
+    expect(writeRequests(fake)).toEqual([])
+  })
+
   it('fails closed before writes when retained comment bodies exceed the aggregate byte limit', async () => {
     const repository = fake.repo('acme', 'widgets')
     const body = 'x'.repeat(65_000)
