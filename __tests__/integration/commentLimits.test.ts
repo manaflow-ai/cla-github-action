@@ -143,11 +143,8 @@ describe('bounded Pull Request comment payloads', () => {
       issueNumber: 9,
       payload: { repository: { id: repository.state.id } }
     })
-    reloadOctokit()
-    const { listBoundedPullRequestComments } =
-      require('../../src/pullrequest/pullRequestComments') as typeof import('../../src/pullrequest/pullRequestComments')
 
-    await expect(listBoundedPullRequestComments()).resolves.toHaveLength(1)
+    await expect(listComments()).resolves.toHaveLength(1)
   })
 
   it.each([42, null, undefined])(
