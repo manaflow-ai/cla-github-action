@@ -1,12 +1,17 @@
 import { context } from '@actions/github'
 import { octokit } from './octokit'
-import { getExpectedHeadSha, getRequiredBaseRef } from './shared/getInputs'
+import {
+  getExpectedBaseSha,
+  getExpectedHeadSha,
+  getRequiredBaseRef
+} from './shared/getInputs'
 
 export interface LivePullRequestSnapshot {
   headSha: string
   headRef: string
   headRepository: string
   headRepositoryId: number
+  baseSha: string
   baseRef: string
   baseRepository: string
   baseRepositoryId: number
@@ -39,6 +44,7 @@ export async function validateLivePullRequest(
   const pullRequest = response.data
   const liveRepository = pullRequest.base.repo?.full_name
   const liveRepositoryId = pullRequest.base.repo?.id
+  const liveBaseSha = pullRequest.base.sha
   const liveHeadRepository = pullRequest.head.repo?.full_name
   const liveHeadRepositoryId = pullRequest.head.repo?.id
   const requiredBaseRef = getRequiredBaseRef()
@@ -73,6 +79,17 @@ export async function validateLivePullRequest(
     )
   }
   if (
+    !liveBaseSha?.trim() ||
+    !pullRequest.base.ref?.trim() ||
+    !liveRepository?.trim() ||
+    !Number.isSafeInteger(liveRepositoryId) ||
+    Number(liveRepositoryId) <= 0
+  ) {
+    throw new Error(
+      'Live Pull Request base has no complete repository or commit identity; refusing a CLA signature write'
+    )
+  }
+  if (
     !pullRequest.head.sha?.trim() ||
     !pullRequest.head.ref?.trim() ||
     !liveHeadRepository?.trim() ||
@@ -99,6 +116,7 @@ export async function validateLivePullRequest(
     headRef: pullRequest.head.ref,
     headRepository: liveHeadRepository,
     headRepositoryId: Number(liveHeadRepositoryId),
+    baseSha: liveBaseSha,
     baseRef: pullRequest.base.ref,
     baseRepository: liveRepository,
     baseRepositoryId: Number(liveRepositoryId),
@@ -110,6 +128,12 @@ export async function validateLivePullRequest(
       'Live Pull Request head does not match expected-head-sha; refusing CLA processing'
     )
   }
+  const expectedBaseSha = getExpectedBaseSha()
+  if (expectedBaseSha && snapshot.baseSha !== expectedBaseSha) {
+    throw new Error(
+      'Live Pull Request base does not match expected-base-sha; refusing CLA processing'
+    )
+  }
   if (
     expected &&
     (snapshot.headSha !== expected.headSha ||
@@ -117,6 +141,7 @@ export async function validateLivePullRequest(
       snapshot.headRepository.toLowerCase() !==
         expected.headRepository.toLowerCase() ||
       snapshot.headRepositoryId !== expected.headRepositoryId ||
+      snapshot.baseSha !== expected.baseSha ||
       snapshot.baseRef !== expected.baseRef ||
       snapshot.baseRepository.toLowerCase() !==
         expected.baseRepository.toLowerCase() ||
@@ -278,6 +303,8 @@ function validatePayloadAgainstLive(
       live.headRepository.toLowerCase() ||
     pullRequest.head.repo?.id !== live.headRepositoryId ||
     pullRequest.base?.ref !== live.baseRef ||
+    (pullRequest.base?.sha !== undefined &&
+      pullRequest.base.sha !== live.baseSha) ||
     pullRequest.base.repo?.full_name?.toLowerCase() !==
       repository.toLowerCase() ||
     pullRequest.base.repo?.id !== live.baseRepositoryId

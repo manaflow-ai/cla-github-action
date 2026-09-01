@@ -40,6 +40,10 @@ commit that introduced it.
 - `signer-preflight` emits the validated `head_sha`. Passing it to the
   write-capable signer as `expected-head-sha` binds both jobs to the same live
   Pull Request head and fails closed after a force-push between them.
+- `signer-preflight` now emits the validated `base_sha`. Passing it to the
+  write-capable signer as `expected-base-sha` binds both jobs to the same live
+  Pull Request base commit and fails closed after a base-branch advance between
+  them.
 - Signature comments must contain only the exact declaration. Appended text,
   changed case or punctuation, quotations, and bot comments do not count.
 - A declaration comment counts only when its GitHub creation and update

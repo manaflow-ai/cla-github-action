@@ -14,6 +14,7 @@ export async function run() {
     core.setOutput('signature_recorded', false)
     core.setOutput('signer_authorized', false)
     core.setOutput('head_sha', '')
+    core.setOutput('base_sha', '')
 
     requireHttpsDocumentUrl()
 
