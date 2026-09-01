@@ -56,6 +56,7 @@ describe('signer-preflight mode', () => {
     type?: 'User' | 'Bot'
     body?: string
     includeTimestamps?: boolean
+    eventLogin?: string
   }) {
     const comment = options.repository.addComment(options.pullRequestNumber, {
       body: options.body ?? SIGN_PHRASE,
@@ -76,7 +77,10 @@ describe('signer-preflight mode', () => {
         comment: {
           id: comment.id,
           body: comment.body,
-          user: comment.user,
+          user: {
+            ...comment.user,
+            ...(options.eventLogin ? { login: options.eventLogin } : {})
+          },
           ...(options.includeTimestamps === false
             ? {}
             : {
@@ -199,6 +203,27 @@ describe('signer-preflight mode', () => {
 
     expect(watch.outputs).toContainEqual(['signer_authorized', true])
     expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
+    expect(watch.failures).toEqual([])
+    expect(writeRequests()).toEqual([])
+    watch.restore()
+  })
+
+  it('keeps numeric identity authorization across a username rename', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest([
+      { author: { login: 'alice-renamed', id: 1001 } }
+    ])
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'alice-renamed',
+      id: 1001,
+      eventLogin: 'alice'
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', true])
     expect(watch.failures).toEqual([])
     expect(writeRequests()).toEqual([])
     watch.restore()

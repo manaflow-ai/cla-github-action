@@ -193,7 +193,6 @@ function sameEventComment(
     !user ||
     user.id !== eventComment.user.id ||
     user.type !== eventComment.user.type ||
-    user.login.toLowerCase() !== eventComment.user.login.toLowerCase() ||
     canonicalComment.body !== eventComment.body
   ) {
     return false
