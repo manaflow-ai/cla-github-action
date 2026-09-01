@@ -48092,6 +48092,11 @@ const getRemoteOrgName = () => {
 const getPathToSignatures = () => getInput('path-to-signatures', { required: false });
 const getPathToDocument = () => getInput('path-to-document', { required: false });
 const getBranch = () => getInput('branch', { required: false });
+/**
+ * Optional immutable head binding supplied by a read-only preflight job.
+ * Empty means that the action uses its normal live Pull Request validation.
+ */
+const getExpectedHeadSha = () => getInput('expected-head-sha', { required: false }).trim();
 const getRequiredBaseRef = () => getInput('required-base-ref', { required: false }) || 'main';
 const getAllowListItem = () => getInput('allowlist', { required: false });
 const getAllowListIds = () => getInput('allowlist-ids', { required: false });
@@ -49251,6 +49256,10 @@ async function validateLivePullRequest(expected) {
         baseRepositoryId: Number(liveRepositoryId),
         opener: { id: opener.id, login: opener.login }
     };
+    const expectedHeadSha = getExpectedHeadSha();
+    if (expectedHeadSha && snapshot.headSha !== expectedHeadSha) {
+        throw new Error('Live Pull Request head does not match expected-head-sha; refusing CLA processing');
+    }
     if (expected &&
         (snapshot.headSha !== expected.headSha ||
             snapshot.headRef !== expected.headRef ||
@@ -49806,6 +49815,7 @@ function requireHttpsDocumentUrl() {
 async function runSignerPreflight() {
     setOutput('signer_authorized', false);
     const livePullRequest = await validateLivePullRequest();
+    setOutput('head_sha', livePullRequest.headSha);
     const eventComment = readEventComment();
     const signPhrase = getPrSignComment();
     if (!commentMatchesPhrase(eventComment, signPhrase)) {
@@ -49931,6 +49941,7 @@ async function run() {
         info(`CLA Assistant GitHub Action bot has started the process`);
         setOutput('signature_recorded', false);
         setOutput('signer_authorized', false);
+        setOutput('head_sha', '');
         requireHttpsDocumentUrl();
         const mode = getMode();
         if (mode === 'signer-preflight') {

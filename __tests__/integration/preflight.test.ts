@@ -154,6 +154,10 @@ describe('signer-preflight mode', () => {
     const repository = addPullRequest([
       { author: { login: 'alice', id: 1001 } }
     ])
+    setDefaultInputs({
+      mode: 'signer-preflight',
+      'expected-head-sha': 'headsha'
+    })
     addCommentEvent({
       repository,
       pullRequestNumber: 7,
@@ -176,7 +180,7 @@ describe('signer-preflight mode', () => {
     await runAction()
 
     expect(watch.failures.join('\n')).toMatch(
-      /expected head commit headsha does not match the live pull request head advanced-headsha/i
+      /live pull request head does not match expected-head-sha/i
     )
     expect(writeRequests()).toEqual([])
     watch.restore()
@@ -203,7 +207,7 @@ describe('signer-preflight mode', () => {
     expect(watch.outputs).toContainEqual(['signer_authorized', false])
     expect(watch.outputs).not.toContainEqual(['head_sha', 'headsha'])
     expect(watch.failures.join('\n')).toMatch(
-      /expected head commit previous-headsha does not match the live pull request head headsha/i
+      /live pull request head does not match expected-head-sha/i
     )
     expect(writeRequests()).toEqual([])
     watch.restore()

@@ -30,6 +30,7 @@ export async function runSignerPreflight(): Promise<void> {
   core.setOutput('signer_authorized', false)
 
   const livePullRequest = await validateLivePullRequest()
+  core.setOutput('head_sha', livePullRequest.headSha)
   const eventComment = readEventComment()
   const signPhrase = getPrSignComment()
 

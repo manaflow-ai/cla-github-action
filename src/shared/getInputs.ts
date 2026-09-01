@@ -26,6 +26,13 @@ export const getPathToDocument = (): string =>
 export const getBranch = (): string =>
   core.getInput('branch', { required: false })
 
+/**
+ * Optional immutable head binding supplied by a read-only preflight job.
+ * Empty means that the action uses its normal live Pull Request validation.
+ */
+export const getExpectedHeadSha = (): string =>
+  core.getInput('expected-head-sha', { required: false }).trim()
+
 export const getRequiredBaseRef = (): string =>
   core.getInput('required-base-ref', { required: false }) || 'main'
 

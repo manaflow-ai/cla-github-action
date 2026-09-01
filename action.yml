@@ -21,6 +21,12 @@ inputs:
   required-base-ref:
     description: "Pull Request base branch allowed to write signatures or be locked after merge. Repositories that accept contributions to another branch must override the secure main default."
     default: "main"
+  expected-head-sha:
+    description: >
+      Optional exact live Pull Request head commit SHA observed by a preceding
+      read-only signer-preflight. When set, both signer-preflight and the
+      write-capable signer fail closed if the live head differs.
+    default: ""
   allowlist:
     description: "Deprecated and ignored. Raw names, emails, and globs can be spoofed in commit metadata."
     default: ""
@@ -83,6 +89,11 @@ outputs:
       'require-opener-as-author' caused the check to fail, so repositories
       can gate additional workflows (e.g. branch protection rules) on this
       output independently of the CLA-check pass/fail.
+  head_sha:
+    description: >
+      In signer-preflight mode, the exact live Pull Request head commit SHA
+      observed after validation. Pass this value as 'expected-head-sha' to the
+      write-capable signer so a force-push between jobs fails closed.
 runs:
   using: "node24"
   main: 'dist/index.js'

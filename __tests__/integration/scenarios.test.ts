@@ -428,15 +428,16 @@ describe('CLA action end-to-end scenarios', () => {
     await runAction()
 
     expect(watch.failures.join('\n')).toMatch(
-      /expected head commit preflight-headsha does not match the live pull request head live-headsha/i
+      /live pull request head does not match expected-head-sha/i
     )
     expect(repository.getFile('signatures/cla.json')).toEqual({
       signedContributors: []
     })
     expect(repository.listComments(31)).toHaveLength(1)
     expect(
-      fake.requestLog.filter(request =>
-        request.method !== 'GET' && !request.path.endsWith('/graphql')
+      fake.requestLog.filter(
+        request =>
+          request.method !== 'GET' && !request.path.endsWith('/graphql')
       )
     ).toEqual([])
     watch.restore()

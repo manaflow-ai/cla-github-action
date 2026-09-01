@@ -37,6 +37,9 @@ commit that introduced it.
 - An authenticated `allowlist-ids` opener now bypasses the opener-authorship
   hard-fail in both signer modes. The mismatch output remains available, and
   a matching commit-derived ID cannot provide the exemption.
+- `signer-preflight` emits the validated `head_sha`. Passing it to the
+  write-capable signer as `expected-head-sha` binds both jobs to the same live
+  Pull Request head and fails closed after a force-push between them.
 - Signature comments must contain only the exact declaration. Appended text,
   changed case or punctuation, quotations, and bot comments do not count.
 - A declaration comment counts only when its GitHub creation and update
