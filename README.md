@@ -318,17 +318,24 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
 <table>
 <tr>
     <td align="center">
-        <a href="https://github.com/iainmcgin">
-            <img src="https://avatars.githubusercontent.com/u/309153?v=4" width="100;" alt="iainmcgin"/>
-            <br />
-            <sub><b>Iain McGinniss</b></sub>
-        </a>
-    </td>
-    <td align="center">
         <a href="https://github.com/ibakshay">
             <img src="https://avatars.githubusercontent.com/u/33329946?v=4" width="100;" alt="ibakshay"/>
             <br />
             <sub><b>Akshay Iyyadurai Balasundaram</b></sub>
+        </a>
+    </td>
+    <td align="center">
+        <a href="https://github.com/lawrencecchen">
+            <img src="https://avatars.githubusercontent.com/u/54008264?v=4" width="100;" alt="lawrencecchen"/>
+            <br />
+            <sub><b>Lawrence Chen</b></sub>
+        </a>
+    </td>
+    <td align="center">
+        <a href="https://github.com/iainmcgin">
+            <img src="https://avatars.githubusercontent.com/u/309153?v=4" width="100;" alt="iainmcgin"/>
+            <br />
+            <sub><b>Iain McGinniss</b></sub>
         </a>
     </td>
     <td align="center">
@@ -351,15 +358,15 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
             <br />
             <sub><b>Rick M</b></sub>
         </a>
-    </td>
+    </td></tr>
+<tr>
     <td align="center">
         <a href="https://github.com/Writhe">
             <img src="https://avatars.githubusercontent.com/u/2022097?v=4" width="100;" alt="Writhe"/>
             <br />
             <sub><b>Filip Moroz</b></sub>
         </a>
-    </td></tr>
-<tr>
+    </td>
     <td align="center">
         <a href="https://github.com/mmv08">
             <img src="https://avatars.githubusercontent.com/u/16622558?v=4" width="100;" alt="mmv08"/>
@@ -394,15 +401,15 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
             <br />
             <sub><b>Robert Pająk</b></sub>
         </a>
-    </td>
+    </td></tr>
+<tr>
     <td align="center">
         <a href="https://github.com/ScottBrenner">
             <img src="https://avatars.githubusercontent.com/u/416477?v=4" width="100;" alt="ScottBrenner"/>
             <br />
             <sub><b>Scott Brenner</b></sub>
         </a>
-    </td></tr>
-<tr>
+    </td>
     <td align="center">
         <a href="https://github.com/silviogutierrez">
             <img src="https://avatars.githubusercontent.com/u/92824?v=4" width="100;" alt="silviogutierrez"/>
@@ -437,15 +444,15 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
             <br />
             <sub><b>Ayman Bagabas</b></sub>
         </a>
-    </td>
+    </td></tr>
+<tr>
     <td align="center">
         <a href="https://github.com/fishcharlie">
             <img src="https://avatars.githubusercontent.com/u/860375?v=4" width="100;" alt="fishcharlie"/>
             <br />
             <sub><b>Charlie Fish</b></sub>
         </a>
-    </td></tr>
-<tr>
+    </td>
     <td align="center">
         <a href="https://github.com/darrellwarde">
             <img src="https://avatars.githubusercontent.com/u/8117355?v=4" width="100;" alt="darrellwarde"/>
@@ -480,15 +487,15 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
             <br />
             <sub><b>Shun Kakinoki</b></sub>
         </a>
-    </td>
+    </td></tr>
+<tr>
     <td align="center">
         <a href="https://github.com/simonmeggle">
             <img src="https://avatars.githubusercontent.com/u/1897410?v=4" width="100;" alt="simonmeggle"/>
             <br />
             <sub><b>Simon Meggle</b></sub>
         </a>
-    </td></tr>
-<tr>
+    </td>
     <td align="center">
         <a href="https://github.com/t8">
             <img src="https://avatars.githubusercontent.com/u/20846869?v=4" width="100;" alt="t8"/>
@@ -523,15 +530,15 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
             <br />
             <sub><b>Peter</b></sub>
         </a>
-    </td>
+    </td></tr>
+<tr>
     <td align="center">
         <a href="https://github.com/wh201906">
             <img src="https://avatars.githubusercontent.com/u/62299611?v=4" width="100;" alt="wh201906"/>
             <br />
             <sub><b>Self Not Found</b></sub>
         </a>
-    </td></tr>
-<tr>
+    </td>
     <td align="center">
         <a href="https://github.com/woxiwangshunlibiye">
             <img src="https://avatars.githubusercontent.com/u/106640041?v=4" width="100;" alt="woxiwangshunlibiye"/>
