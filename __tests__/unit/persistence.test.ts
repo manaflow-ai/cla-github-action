@@ -265,6 +265,60 @@ describe('persistence', () => {
       http.assertClean()
     })
 
+    it('stops after the bounded number of ledger conflict retries', async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        http
+          .github()
+          .intercept({
+            path: '/repos/acme/widgets/contents/signatures%2Fv1%2Fcla.json',
+            method: 'PUT'
+          })
+          .reply(409, { message: 'sha does not match' })
+        if (attempt < 2) {
+          http
+            .github()
+            .intercept({
+              path: '/repos/acme/widgets/contents/signatures%2Fv1%2Fcla.json?ref=main',
+              method: 'GET'
+            })
+            .reply(
+              200,
+              {
+                sha: `latestsha-${attempt}`,
+                content: Buffer.from(
+                  JSON.stringify({
+                    signedContributors: [
+                      { name: `other-${attempt}`, id: attempt + 3 }
+                    ]
+                  })
+                ).toString('base64')
+              },
+              { headers: { 'content-type': 'application/json' } }
+            )
+        }
+      }
+
+      const { updateFile } = loadPersistence()
+      let validationCalls = 0
+      await expect(
+        updateFile(
+          'oldsha',
+          { signedContributors: [{ name: 'alice', id: 1 }] },
+          {
+            newSigned: [{ name: 'bob', id: 2 }],
+            onlyCommitters: [],
+            allSignedFlag: false
+          },
+          async () => {
+            validationCalls += 1
+          }
+        )
+      ).rejects.toThrow(/sha does not match/i)
+
+      expect(validationCalls).toBe(3)
+      http.assertClean()
+    })
+
     it('rejects a serialized ledger larger than 1000000 bytes before writing', async () => {
       const { updateFile } = loadPersistence()
       await expect(
