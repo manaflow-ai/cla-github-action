@@ -13,6 +13,11 @@ commit that introduced it.
 
 ### Security
 
+- The write-capable signer now emits `cla_passed=true` only after final
+  all-signed validation and the corresponding bot comment apply succeed. The
+  output is false for preflight, unsigned, closed, and error runs, and does
+  not change the existing `signature_recorded` output semantics.
+
 - `pull_request_target` `ready_for_review` events are now admitted for the
   same live Pull Request identity and base-branch checks as other open
   lifecycle events. This lets a draft Pull Request receive its CLA check when

@@ -95,6 +95,12 @@ inputs:
       style contribution workflows).
     default: "true"
 outputs:
+  cla_passed:
+    description: >
+      Set to 'true' only after the write-capable signer has confirmed that all
+      required contributors have signed and successfully applied the final
+      all-signed CLA bot comment. It remains 'false' for preflight, unsigned,
+      closed, and error runs.
   signer_authorized:
     description: >
       Set to 'true' only when signer-preflight mode verifies that the current

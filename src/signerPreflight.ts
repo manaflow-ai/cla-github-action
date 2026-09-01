@@ -33,6 +33,9 @@ export function setSignerDecision(decision: SignerDecision): void {
  * signal for a least-privilege workflow gate.
  */
 export async function runSignerPreflight(): Promise<void> {
+  // Preflight is an admission check only. It never establishes a final CLA
+  // result, even when the signer identity is authorized.
+  core.setOutput('cla_passed', false)
   core.setOutput('signer_authorized', false)
 
   const livePullRequest = await validateLivePullRequest()
