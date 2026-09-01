@@ -1,6 +1,6 @@
 import { context } from '@actions/github'
 import { octokit } from './octokit'
-import { getRequiredBaseRef } from './shared/getInputs'
+import { getExpectedHeadSha, getRequiredBaseRef } from './shared/getInputs'
 
 export interface LivePullRequestSnapshot {
   headSha: string
@@ -103,6 +103,12 @@ export async function validateLivePullRequest(
     baseRepository: liveRepository,
     baseRepositoryId: Number(liveRepositoryId),
     opener: { id: opener.id, login: opener.login }
+  }
+  const expectedHeadSha = getExpectedHeadSha()
+  if (expectedHeadSha && snapshot.headSha !== expectedHeadSha) {
+    throw new Error(
+      'Live Pull Request head does not match expected-head-sha; refusing CLA processing'
+    )
   }
   if (
     expected &&

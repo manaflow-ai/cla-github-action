@@ -140,11 +140,76 @@ describe('signer-preflight mode', () => {
     await runAction()
 
     expect(watch.outputs).toContainEqual(['signer_authorized', true])
+    expect(watch.outputs).toContainEqual(['head_sha', 'headsha'])
     expect(watch.failures).toEqual([])
     expect(repository.listComments(7)).toHaveLength(1)
     expect(repository.getFile('signatures/cla.json')).toBeUndefined()
     expect(writeRequests()).toEqual([])
     expect(comment.body).toBe(SIGN_PHRASE)
+    watch.restore()
+  })
+
+  it('binds a writer run to the exact head observed by preflight', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest([
+      { author: { login: 'alice', id: 1001 } }
+    ])
+    setDefaultInputs({
+      mode: 'signer-preflight',
+      'expected-head-sha': 'headsha'
+    })
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'alice',
+      id: 1001
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', true])
+    expect(watch.outputs).toContainEqual(['head_sha', 'headsha'])
+
+    const livePullRequest = repository.state.pulls.get(7)!
+    livePullRequest.head.sha = 'advanced-headsha'
+    setDefaultInputs({
+      mode: 'sign',
+      'expected-head-sha': 'headsha'
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /live pull request head does not match expected-head-sha/i
+    )
+    expect(writeRequests()).toEqual([])
+    watch.restore()
+  })
+
+  it('rejects a stale expected head before signer-preflight identity reads', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest([
+      { author: { login: 'alice', id: 1001 } }
+    ])
+    setDefaultInputs({
+      mode: 'signer-preflight',
+      'expected-head-sha': 'previous-headsha'
+    })
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'alice',
+      id: 1001
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).not.toContainEqual(['head_sha', 'headsha'])
+    expect(watch.failures.join('\n')).toMatch(
+      /live pull request head does not match expected-head-sha/i
+    )
+    expect(writeRequests()).toEqual([])
     watch.restore()
   })
 
@@ -204,6 +269,86 @@ describe('signer-preflight mode', () => {
     expect(watch.outputs).toContainEqual(['signer_authorized', true])
     expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
     expect(watch.failures).toEqual([])
+    expect(writeRequests()).toEqual([])
+    watch.restore()
+  })
+
+  it.each([
+    ['Austin', 'austin', 38676809],
+    ['Aziz', 'aziz', 67667005]
+  ] as const)(
+    'allows an authenticated %s opener exemption when their commits are authored by others',
+    async (_name, login, id) => {
+      const watch = watchCore()
+      const repository = addPullRequest(
+        [{ author: { login: 'bob', id: 2002 } }],
+        { login, id }
+      )
+      setDefaultInputs({
+        mode: 'signer-preflight',
+        'allowlist-ids': String(id)
+      })
+      addCommentEvent({
+        repository,
+        pullRequestNumber: 7,
+        login: 'bob',
+        id: 2002
+      })
+
+      await runAction()
+
+      expect(watch.outputs).toContainEqual(['signer_authorized', true])
+      expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
+      expect(watch.failures).toEqual([])
+      expect(writeRequests()).toEqual([])
+      watch.restore()
+    }
+  )
+
+  it('rejects an opener mismatch when the live opener is not allowlisted', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest(
+      [{ author: { login: 'bob', id: 2002 } }],
+      { login: 'alice', id: 1001 }
+    )
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'bob',
+      id: 2002
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
+    expect(watch.failures.join('\n')).toMatch(/opener @alice/i)
+    expect(writeRequests()).toEqual([])
+    watch.restore()
+  })
+
+  it('does not treat a forged commit identity as an opener allowlist match', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest(
+      [{ author: { login: 'bob', id: 2002 } }],
+      { login: 'alice', id: 1001 }
+    )
+    setDefaultInputs({
+      mode: 'signer-preflight',
+      'allowlist-ids': '2002'
+    })
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'bob',
+      id: 2002
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
+    expect(watch.failures.join('\n')).toMatch(/opener @alice/i)
     expect(writeRequests()).toEqual([])
     watch.restore()
   })

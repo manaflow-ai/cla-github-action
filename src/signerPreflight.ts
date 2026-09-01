@@ -1,5 +1,6 @@
 import * as core from '@actions/core'
 import { context } from '@actions/github'
+import { isPullRequestOpenerAllowlisted } from './checkAllowList'
 import getCommitters from './graphql'
 import { validateLivePullRequest } from './livePullRequest'
 import { Committer, CommitterMap } from './interfaces'
@@ -29,6 +30,7 @@ export async function runSignerPreflight(): Promise<void> {
   core.setOutput('signer_authorized', false)
 
   const livePullRequest = await validateLivePullRequest()
+  core.setOutput('head_sha', livePullRequest.headSha)
   const eventComment = readEventComment()
   const signPhrase = getPrSignComment()
 
@@ -67,7 +69,11 @@ export async function runSignerPreflight(): Promise<void> {
   if (openerMismatch) {
     core.setOutput('opener_not_in_commits', true)
   }
-  if (openerMismatch && requireOpenerAsAuthor()) {
+  if (
+    openerMismatch &&
+    requireOpenerAsAuthor() &&
+    !isPullRequestOpenerAllowlisted(livePullRequest.opener)
+  ) {
     core.setFailed(openerAuthorshipMismatchMessage(openerMismatch))
     return
   }

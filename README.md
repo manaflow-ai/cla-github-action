@@ -152,7 +152,7 @@ The sample lets any authenticated human Pull Request commenter use `recheck` onl
 
 The action exposes `signature_recorded=true` only after it persists a new signature. The sample gives the action step an ID and publishes this as `needs.CLAAssistant.outputs.signature_recorded` for a trusted later job in the same workflow. That rerun job may use the output only after it binds the exact failed check to the current Pull Request number, head SHA, base branch, and workflow. A separate workflow cannot consume a job output directly and needs an authenticated handoff. Do not authorize a rerun from an arbitrary signing comment when this output is false.
 
-For a least-privilege admission gate, run the action with `mode: signer-preflight` in a separate job that has only `contents: read`, `pull-requests: read`, and `issues: read`. The GraphQL commit identity connection requires `contents: read` in private repositories. The mode re-fetches the live Pull Request, resolves the current author/co-author/committer identities through the same bounded GraphQL query as the signer, and verifies the event comment against the canonical unedited comment. It sets `signer_authorized=true` only for a matching account ID. It does not read or write the signature ledger, create or edit comments, or lock the Pull Request. The write-capable signer must still perform its own live validation after the gate because a preflight output is an ephemeral admission result, not a durable authorization token.
+For a least-privilege admission gate, run the action with `mode: signer-preflight` in a separate job that has only `contents: read`, `pull-requests: read`, and `issues: read`. The GraphQL commit identity connection requires `contents: read` in private repositories. The mode re-fetches the live Pull Request, resolves the current author/co-author/committer identities through the same bounded GraphQL query as the signer, and verifies the event comment against the canonical unedited comment. It sets `signer_authorized=true` only for a matching account ID and emits the validated head as `head_sha`. It does not read or write the signature ledger, create or edit comments, or lock the Pull Request. Pass `${{ steps.preflight.outputs.head_sha }}` to the writer's `expected-head-sha` input. The writer compares that value with the live head before any ledger or comment write and on every later revalidation, so a force-push between jobs fails closed. The write-capable signer must still perform its own live validation after the gate because a preflight output is an ephemeral admission result, not a durable authorization token.
 
 The action publishes an all-signed bot comment only after it revalidates the signing comments and persists any new signatures. If a signer edits or deletes the declaration during the run, the ledger and the previous trusted bot status stay unchanged.
 
@@ -259,7 +259,7 @@ and `remote-repository-name`: `<your repo name>` in your CLA workflow file.
 
 #### 5. Authenticated opener ID allowlist
 
-Use `allowlist-ids` only when a specific automated Pull Request opener must be exempt. Values are comma-separated numeric GitHub database IDs. The action applies an exemption only when the live Pull Request API authenticates that ID as the opener. It never exempts an author, co-author, or committer derived only from git metadata. The deprecated `allowlist` name, email, and glob input is ignored because commit metadata can spoof those values.
+Use `allowlist-ids` only when a specific automated Pull Request opener must be exempt. Values are comma-separated numeric GitHub database IDs. The action applies an exemption only when the live Pull Request API authenticates that ID as the opener, and then bypasses only the opener-authorship hard-fail. It never exempts an author, co-author, or committer derived only from git metadata. The deprecated `allowlist` name, email, and glob input is ignored because commit metadata can spoof those values.
 
 ##### Demo for step 5
 
@@ -290,6 +290,7 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
 | `path-to-signatures`       | _optional_ |  Path to the JSON file where  all the signatures of the contributors will be stored inside the repository. | signatures/version1/cla.json |
 | `branch`   | _optional_ |  Branch in which all the signatures of the contributors will be stored and Default branch is `master`.  | master |
 | `required-base-ref`   | _optional_ | Only a Pull Request with this live base branch can write signature data or be locked after merge. The secure default is `main`. Set this input explicitly when the contribution branch has another name. | main |
+| `expected-head-sha`   | _optional_  | Exact head SHA emitted by a preceding `signer-preflight` job. The signer fails closed when the live Pull Request head differs. Leave empty when no cross-job head binding is needed. | `${{ steps.preflight.outputs.head_sha }}` |
 | `allowlist-ids`   | _optional_ | Comma-separated numeric GitHub user IDs. Only the authenticated live Pull Request opener can be exempt. Commit-derived identities are never exempt. | Leave empty unless a documented automated opener was reviewed. |
 | `allowlist`   | _deprecated_ | Ignored. Raw names, emails, and globs are unsafe identity evidence. | |
 | `remote-repository-name`   | _optional_ | provide the remote repository name where all the signatures should be stored . | remote repository name |
@@ -309,6 +310,7 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
 | Name                  | Description |
 | --------------------- | ----------- |
 | `signer_authorized` | In `signer-preflight` mode, set to `'true'` only when the current newly-created, exact, unedited declaration is authored by an authenticated identity in the live Pull Request's author, co-author, committer, or opener set. The write-capable signer must repeat its live checks; this output is not a bearer authorization token. |
+| `head_sha` | In `signer-preflight` mode, the exact live Pull Request head SHA observed after validation. Pass it to the writer as `expected-head-sha` to reject a force-push between jobs. |
 | `opener_not_in_commits` | Set to `'true'` when the Pull Request opener is not recorded as an author or co-author of any commit in the PR. Emitted regardless of whether `require-opener-as-author` caused the check to fail. |
 | `signature_recorded` | Set to `'true'` only after this run persists a new signature in the ledger. |
 

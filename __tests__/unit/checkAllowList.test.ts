@@ -1,6 +1,9 @@
 import * as core from '@actions/core'
 import { resetEnv, setInput } from '../testHelpers/env'
-import { checkAllowList } from '../../src/checkAllowList'
+import {
+  checkAllowList,
+  isPullRequestOpenerAllowlisted
+} from '../../src/checkAllowList'
 import { Committer } from '../../src/interfaces'
 
 function committer(
@@ -74,6 +77,19 @@ describe('checkAllowList', () => {
     setInput('allowlist-ids', '')
     const committers = [committer('alice', 1001), committer('bob', 2002)]
     expect(checkAllowList(committers)).toEqual(committers)
+  })
+
+  it('matches only a configured authenticated opener ID', () => {
+    setInput('allowlist-ids', '38676809,67667005')
+    expect(isPullRequestOpenerAllowlisted({ id: 38676809 })).toBe(true)
+    expect(isPullRequestOpenerAllowlisted({ id: 67667005 })).toBe(true)
+    expect(isPullRequestOpenerAllowlisted({ id: 2002 })).toBe(false)
+  })
+
+  it('rejects invalid opener IDs even when the text is configured', () => {
+    setInput('allowlist-ids', '0,9007199254740992')
+    expect(isPullRequestOpenerAllowlisted({ id: 0 })).toBe(false)
+    expect(isPullRequestOpenerAllowlisted({ id: Number.NaN })).toBe(false)
   })
 
   it('skips null and undefined entries without creating an exemption', () => {

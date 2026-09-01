@@ -48092,6 +48092,11 @@ const getRemoteOrgName = () => {
 const getPathToSignatures = () => getInput('path-to-signatures', { required: false });
 const getPathToDocument = () => getInput('path-to-document', { required: false });
 const getBranch = () => getInput('branch', { required: false });
+/**
+ * Optional immutable head binding supplied by a read-only preflight job.
+ * Empty means that the action uses its normal live Pull Request validation.
+ */
+const getExpectedHeadSha = () => getInput('expected-head-sha', { required: false }).trim();
 const getRequiredBaseRef = () => getInput('required-base-ref', { required: false }) || 'main';
 const getAllowListItem = () => getInput('allowlist', { required: false });
 const getAllowListIds = () => getInput('allowlist-ids', { required: false });
@@ -48148,9 +48153,20 @@ function checkAllowList(committers) {
         warning(`Invalid allowlist-ids entries were ignored: ${invalid.join(', ')}`);
     }
     return committers.filter(committer => committer &&
-        !(committer.isPullRequestOpener &&
-            committer.id > 0 &&
-            ids.has(committer.id)));
+        !(committer.isPullRequestOpener && isAllowlistedId(committer.id, ids)));
+}
+/**
+ * Check an authenticated live Pull Request opener against the numeric ID
+ * allowlist. Commit-derived identities must never be passed as the opener.
+ * Invalid configuration is ignored here; the normal filtering path reports
+ * configuration warnings before it removes any contributor.
+ */
+function isPullRequestOpenerAllowlisted(opener) {
+    const { ids } = parseAllowListIds(getAllowListIds());
+    return isAllowlistedId(opener.id, ids);
+}
+function isAllowlistedId(id, ids) {
+    return Number.isSafeInteger(id) && id > 0 && ids.has(id);
 }
 function parseAllowListIds(value) {
     const ids = new Set();
@@ -49240,6 +49256,10 @@ async function validateLivePullRequest(expected) {
         baseRepositoryId: Number(liveRepositoryId),
         opener: { id: opener.id, login: opener.login }
     };
+    const expectedHeadSha = getExpectedHeadSha();
+    if (expectedHeadSha && snapshot.headSha !== expectedHeadSha) {
+        throw new Error('Live Pull Request head does not match expected-head-sha; refusing CLA processing');
+    }
     if (expected &&
         (snapshot.headSha !== expected.headSha ||
             snapshot.headRef !== expected.headRef ||
@@ -49730,7 +49750,7 @@ function detectOpenerMismatch(commitAuthors, opener) {
     setOutput('opener_not_in_commits', true);
     return {
         ...mismatch,
-        hardFail: requireOpenerAsAuthor()
+        hardFail: requireOpenerAsAuthor() && !isPullRequestOpenerAllowlisted(opener)
     };
 }
 
@@ -49785,6 +49805,7 @@ function requireHttpsDocumentUrl() {
 
 
 
+
 /**
  * Authenticate the current signing comment without invoking any ledger or
  * Pull Request write. The write-capable action must still repeat all live
@@ -49794,6 +49815,7 @@ function requireHttpsDocumentUrl() {
 async function runSignerPreflight() {
     setOutput('signer_authorized', false);
     const livePullRequest = await validateLivePullRequest();
+    setOutput('head_sha', livePullRequest.headSha);
     const eventComment = readEventComment();
     const signPhrase = getPrSignComment();
     if (!commentMatchesPhrase(eventComment, signPhrase)) {
@@ -49816,7 +49838,9 @@ async function runSignerPreflight() {
     if (openerMismatch) {
         setOutput('opener_not_in_commits', true);
     }
-    if (openerMismatch && requireOpenerAsAuthor()) {
+    if (openerMismatch &&
+        requireOpenerAsAuthor() &&
+        !isPullRequestOpenerAllowlisted(livePullRequest.opener)) {
         setFailed(openerAuthorshipMismatchMessage(openerMismatch));
         return;
     }
@@ -49917,6 +49941,7 @@ async function run() {
         info(`CLA Assistant GitHub Action bot has started the process`);
         setOutput('signature_recorded', false);
         setOutput('signer_authorized', false);
+        setOutput('head_sha', '');
         requireHttpsDocumentUrl();
         const mode = getMode();
         if (mode === 'signer-preflight') {

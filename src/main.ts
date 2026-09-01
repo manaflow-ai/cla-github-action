@@ -13,6 +13,7 @@ export async function run() {
     core.info(`CLA Assistant GitHub Action bot has started the process`)
     core.setOutput('signature_recorded', false)
     core.setOutput('signer_authorized', false)
+    core.setOutput('head_sha', '')
 
     requireHttpsDocumentUrl()
 

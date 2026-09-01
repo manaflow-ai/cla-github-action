@@ -26,12 +26,25 @@ export function checkAllowList(committers: Committer[]): Committer[] {
   return committers.filter(
     committer =>
       committer &&
-      !(
-        committer.isPullRequestOpener &&
-        committer.id > 0 &&
-        ids.has(committer.id)
-      )
+      !(committer.isPullRequestOpener && isAllowlistedId(committer.id, ids))
   )
+}
+
+/**
+ * Check an authenticated live Pull Request opener against the numeric ID
+ * allowlist. Commit-derived identities must never be passed as the opener.
+ * Invalid configuration is ignored here; the normal filtering path reports
+ * configuration warnings before it removes any contributor.
+ */
+export function isPullRequestOpenerAllowlisted(opener: {
+  id: number
+}): boolean {
+  const { ids } = parseAllowListIds(input.getAllowListIds())
+  return isAllowlistedId(opener.id, ids)
+}
+
+function isAllowlistedId(id: number, ids: Set<number>): boolean {
+  return Number.isSafeInteger(id) && id > 0 && ids.has(id)
 }
 
 function parseAllowListIds(value: string): {
