@@ -58,15 +58,15 @@ export async function listBoundedPullRequestComments(): Promise<
           )
         }
         const bodyBytes = Buffer.byteLength(comment.body, 'utf8')
-        if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BODY_BYTES) {
-          continue
-        }
         if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BYTES - observedBodyBytes) {
           throw new PullRequestCommentLimitError(
             `The combined Pull Request comment bodies exceed ${MAX_PULL_REQUEST_COMMENT_BYTES} bytes. The action will fail closed.`
           )
         }
         observedBodyBytes += bodyBytes
+        if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BODY_BYTES) {
+          continue
+        }
         boundedPage.push(comment)
       }
       return boundedPage
