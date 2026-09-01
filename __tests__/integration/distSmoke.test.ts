@@ -250,6 +250,58 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
     expect(fake.recordedRerunRequests).toEqual([])
   }, 20000)
 
+  it('bundled signer-preflight admits a contributor without write requests', async () => {
+    const repository = fake.repo('acme', 'widgets')
+    repository.addPullRequest({
+      number: 17,
+      head: { sha: 'headsha', ref: 'feature/preflight' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    const comment = repository.addComment(17, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    const eventPath = writeEventFile({
+      action: 'created',
+      issue: { number: 17, state: 'open', pull_request: {} },
+      comment: {
+        id: comment.id,
+        body: comment.body,
+        user: comment.user,
+        created_at: comment.created_at,
+        updated_at: comment.updated_at
+      },
+      repository: {
+        id: repository.state.id,
+        full_name: 'acme/widgets'
+      }
+    })
+
+    const result = await runDist({
+      ...defaultInputEnv({
+        INPUT_MODE: 'signer-preflight',
+        INPUT_BRANCH: 'cla-signatures'
+      }),
+      ...githubEnv(fake, {
+        eventName: 'issue_comment',
+        eventPath,
+        actor: 'alice'
+      })
+    })
+
+    expect(result.code).toBe(0)
+    expect(result.stdout).toMatch(/signer_authorized::true/)
+    expect(repository.listComments(17)).toHaveLength(1)
+    expect(repository.getFile('signatures/cla.json')).toBeUndefined()
+    expect(
+      fake.requestLog.filter(request => {
+        if (request.method === 'GET') return false
+        return !(request.method === 'POST' && request.path.endsWith('/graphql'))
+      })
+    ).toEqual([])
+  }, 20000)
+
   it('bundled action calls the lock endpoint on a merged PR close event', async () => {
     const repositoryId = fake.repo('acme', 'widgets').state.id
     fake.repo('acme', 'widgets').addPullRequest({

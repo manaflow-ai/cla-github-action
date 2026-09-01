@@ -14,6 +14,7 @@ export interface FakeGitHub {
   repo(owner: string, name: string): FakeRepoHandle
   recordedLocks: FakeGitHubCore['recordedLocks']
   recordedRerunRequests: FakeGitHubCore['recordedRerunRequests']
+  requestLog: Array<{ method: string; path: string; body: string }>
   injectFailure: FakeGitHubCore['injectFailure']
   close(): Promise<void>
 }
@@ -25,10 +26,12 @@ export function installFakeGitHub(): FakeGitHub {
   setGlobalDispatcher(agent)
 
   const core = createFakeGitHubCore()
+  const requestLog: FakeGitHub['requestLog'] = []
 
   function makeReply(method: string) {
     return (opts: any) => {
       const rawBody = typeof opts.body === 'string' ? opts.body : ''
+      requestLog.push({ method, path: opts.path, body: rawBody })
       const { status, body, headers } = core.route(method, opts.path, rawBody)
       return {
         statusCode: status,
@@ -49,6 +52,7 @@ export function installFakeGitHub(): FakeGitHub {
     repo: core.repo,
     recordedLocks: core.recordedLocks,
     recordedRerunRequests: core.recordedRerunRequests,
+    requestLog,
     injectFailure: core.injectFailure,
     async close() {
       await agent.close()

@@ -24,6 +24,11 @@ import {
   validateLivePullRequest
 } from './livePullRequest'
 import {
+  findOpenerAuthorshipMismatch,
+  includePullRequestOpener,
+  openerAuthorshipMismatchMessage
+} from './shared/committers'
+import {
   MAX_LEDGER_BYTES,
   MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS,
   MAX_LEDGER_SIGNATURES
@@ -51,7 +56,8 @@ export async function setupClaCheck() {
   )
   let committers = includePullRequestOpener(
     commitAuthors,
-    livePullRequest.opener
+    livePullRequest.opener,
+    context.issue.number
   )
   committers = checkAllowList(committers)
   if (openerMismatch) {
@@ -351,33 +357,7 @@ const getInitialCommittersMap = (): CommitterMap => ({
 function openerMismatchError(
   mismatch: NonNullable<CommitterMap['openerMismatch']>
 ): string {
-  return `Pull Request opener @${mismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`
-}
-
-/**
- * Prepend the PR opener to the committer set if they are not already present
- * via a commit or Co-authored-by trailer. The PR submitter is a contributor
- * to the merge in their own right and must sign the CLA, even if every commit
- * was authored by someone else.
- */
-function includePullRequestOpener(
-  committers: Committer[],
-  opener: LivePullRequestSnapshot['opener']
-): Committer[] {
-  const existing = committers.find(c => c.id === opener.id)
-  if (existing) {
-    existing.isPullRequestOpener = true
-    return committers
-  }
-  return [
-    {
-      name: opener.login,
-      id: opener.id,
-      pullRequestNo: context.issue.number,
-      isPullRequestOpener: true
-    },
-    ...committers
-  ]
+  return openerAuthorshipMismatchMessage(mismatch)
 }
 
 /**
@@ -395,16 +375,11 @@ function detectOpenerMismatch(
   commitAuthors: Committer[],
   opener: LivePullRequestSnapshot['opener']
 ): { opener: string; commitAuthors: string[]; hardFail: boolean } | undefined {
-  const authorshipIdentities = commitAuthors.filter(
-    committer => committer.isPrimaryAuthor || committer.isCoAuthor
-  )
-  if (authorshipIdentities.some(c => c.id === opener.id)) return undefined
+  const mismatch = findOpenerAuthorshipMismatch(commitAuthors, opener)
+  if (!mismatch) return undefined
   core.setOutput('opener_not_in_commits', true)
   return {
-    opener: opener.login,
-    commitAuthors: authorshipIdentities
-      .map(c => c.name)
-      .filter(n => n.length > 0),
+    ...mismatch,
     hardFail: requireOpenerAsAuthor()
   }
 }

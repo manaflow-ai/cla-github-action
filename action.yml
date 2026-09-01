@@ -5,6 +5,13 @@ branding:
   icon: "award"
   color: blue
 inputs:
+  mode:
+    description: >
+      Execution mode. The default 'sign' mode reads and updates the configured
+      signature ledger. Set 'signer-preflight' only in an unprivileged gate to
+      authenticate the current exact signing comment and emit
+      'signer_authorized' without writing comments or signature data.
+    default: "sign"
   path-to-signatures:
     description: "Give a path for storing CLAs in a json file "
     default: "./signatures/cla.json"
@@ -57,6 +64,13 @@ inputs:
       style contribution workflows).
     default: "true"
 outputs:
+  signer_authorized:
+    description: >
+      Set to 'true' only when signer-preflight mode verifies that the current
+      exact, unedited signing comment belongs to an authenticated identity in
+      the live Pull Request's author, co-author, committer, or opener set.
+      This output is an admission result, not a replacement for the normal
+      write-capable action's live revalidation.
   signature_recorded:
     description: >
       Set to 'true' only when this run accepted a new Pull Request signing
