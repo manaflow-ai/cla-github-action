@@ -34,6 +34,9 @@ commit that introduced it.
 - The deprecated name, email, and glob `allowlist` is ignored. The new
   `allowlist-ids` input can exempt only the authenticated live Pull Request
   opener. It never exempts an identity derived only from commit metadata.
+- An authenticated `allowlist-ids` opener now bypasses the opener-authorship
+  hard-fail in both signer modes. The mismatch output remains available, and
+  a matching commit-derived ID cannot provide the exemption.
 - Signature comments must contain only the exact declaration. Appended text,
   changed case or punctuation, quotations, and bot comments do not count.
 - A declaration comment counts only when its GitHub creation and update

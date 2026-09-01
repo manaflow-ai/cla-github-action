@@ -259,7 +259,7 @@ and `remote-repository-name`: `<your repo name>` in your CLA workflow file.
 
 #### 5. Authenticated opener ID allowlist
 
-Use `allowlist-ids` only when a specific automated Pull Request opener must be exempt. Values are comma-separated numeric GitHub database IDs. The action applies an exemption only when the live Pull Request API authenticates that ID as the opener. It never exempts an author, co-author, or committer derived only from git metadata. The deprecated `allowlist` name, email, and glob input is ignored because commit metadata can spoof those values.
+Use `allowlist-ids` only when a specific automated Pull Request opener must be exempt. Values are comma-separated numeric GitHub database IDs. The action applies an exemption only when the live Pull Request API authenticates that ID as the opener, and then bypasses only the opener-authorship hard-fail. It never exempts an author, co-author, or committer derived only from git metadata. The deprecated `allowlist` name, email, and glob input is ignored because commit metadata can spoof those values.
 
 ##### Demo for step 5
 

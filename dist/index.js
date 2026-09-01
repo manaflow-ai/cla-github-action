@@ -48148,9 +48148,20 @@ function checkAllowList(committers) {
         warning(`Invalid allowlist-ids entries were ignored: ${invalid.join(', ')}`);
     }
     return committers.filter(committer => committer &&
-        !(committer.isPullRequestOpener &&
-            committer.id > 0 &&
-            ids.has(committer.id)));
+        !(committer.isPullRequestOpener && isAllowlistedId(committer.id, ids)));
+}
+/**
+ * Check an authenticated live Pull Request opener against the numeric ID
+ * allowlist. Commit-derived identities must never be passed as the opener.
+ * Invalid configuration is ignored here; the normal filtering path reports
+ * configuration warnings before it removes any contributor.
+ */
+function isPullRequestOpenerAllowlisted(opener) {
+    const { ids } = parseAllowListIds(getAllowListIds());
+    return isAllowlistedId(opener.id, ids);
+}
+function isAllowlistedId(id, ids) {
+    return Number.isSafeInteger(id) && id > 0 && ids.has(id);
 }
 function parseAllowListIds(value) {
     const ids = new Set();
@@ -49730,7 +49741,7 @@ function detectOpenerMismatch(commitAuthors, opener) {
     setOutput('opener_not_in_commits', true);
     return {
         ...mismatch,
-        hardFail: requireOpenerAsAuthor()
+        hardFail: requireOpenerAsAuthor() && !isPullRequestOpenerAllowlisted(opener)
     };
 }
 
@@ -49785,6 +49796,7 @@ function requireHttpsDocumentUrl() {
 
 
 
+
 /**
  * Authenticate the current signing comment without invoking any ledger or
  * Pull Request write. The write-capable action must still repeat all live
@@ -49816,7 +49828,9 @@ async function runSignerPreflight() {
     if (openerMismatch) {
         setOutput('opener_not_in_commits', true);
     }
-    if (openerMismatch && requireOpenerAsAuthor()) {
+    if (openerMismatch &&
+        requireOpenerAsAuthor() &&
+        !isPullRequestOpenerAllowlisted(livePullRequest.opener)) {
         setFailed(openerAuthorshipMismatchMessage(openerMismatch));
         return;
     }

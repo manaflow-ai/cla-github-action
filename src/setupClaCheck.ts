@@ -1,6 +1,9 @@
 import * as core from '@actions/core'
 import { context } from '@actions/github'
-import { checkAllowList } from './checkAllowList'
+import {
+  checkAllowList,
+  isPullRequestOpenerAllowlisted
+} from './checkAllowList'
 import getCommitters from './graphql'
 import {
   ClaFileContent,
@@ -380,6 +383,6 @@ function detectOpenerMismatch(
   core.setOutput('opener_not_in_commits', true)
   return {
     ...mismatch,
-    hardFail: requireOpenerAsAuthor()
+    hardFail: requireOpenerAsAuthor() && !isPullRequestOpenerAllowlisted(opener)
   }
 }

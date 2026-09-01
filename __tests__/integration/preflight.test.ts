@@ -208,6 +208,86 @@ describe('signer-preflight mode', () => {
     watch.restore()
   })
 
+  it.each([
+    ['Austin', 'austin', 38676809],
+    ['Aziz', 'aziz', 67667005]
+  ] as const)(
+    'allows an authenticated %s opener exemption when their commits are authored by others',
+    async (_name, login, id) => {
+      const watch = watchCore()
+      const repository = addPullRequest(
+        [{ author: { login: 'bob', id: 2002 } }],
+        { login, id }
+      )
+      setDefaultInputs({
+        mode: 'signer-preflight',
+        'allowlist-ids': String(id)
+      })
+      addCommentEvent({
+        repository,
+        pullRequestNumber: 7,
+        login: 'bob',
+        id: 2002
+      })
+
+      await runAction()
+
+      expect(watch.outputs).toContainEqual(['signer_authorized', true])
+      expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
+      expect(watch.failures).toEqual([])
+      expect(writeRequests()).toEqual([])
+      watch.restore()
+    }
+  )
+
+  it('rejects an opener mismatch when the live opener is not allowlisted', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest(
+      [{ author: { login: 'bob', id: 2002 } }],
+      { login: 'alice', id: 1001 }
+    )
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'bob',
+      id: 2002
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
+    expect(watch.failures.join('\n')).toMatch(/opener @alice/i)
+    expect(writeRequests()).toEqual([])
+    watch.restore()
+  })
+
+  it('does not treat a forged commit identity as an opener allowlist match', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest(
+      [{ author: { login: 'bob', id: 2002 } }],
+      { login: 'alice', id: 1001 }
+    )
+    setDefaultInputs({
+      mode: 'signer-preflight',
+      'allowlist-ids': '2002'
+    })
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'bob',
+      id: 2002
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
+    expect(watch.failures.join('\n')).toMatch(/opener @alice/i)
+    expect(writeRequests()).toEqual([])
+    watch.restore()
+  })
+
   it('keeps numeric identity authorization across a username rename', async () => {
     const watch = watchCore()
     const repository = addPullRequest([
