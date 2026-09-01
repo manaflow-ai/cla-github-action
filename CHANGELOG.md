@@ -13,6 +13,12 @@ commit that introduced it.
 
 ### Security
 
+- Added a `signer-preflight` mode for least-privilege workflows. It reuses the
+  live Pull Request and bounded GraphQL identity checks, authenticates the
+  current exact unedited signing comment by numeric account ID, emits
+  `signer_authorized`, and performs no ledger, comment, or lock write. The
+  normal `sign` mode is unchanged.
+
 - The action now rejects an empty, relative, or non-HTTPS
   `path-to-document` input before it makes a GitHub write.
 - Commit identities now come from GitHub's GraphQL `Commit.authors`

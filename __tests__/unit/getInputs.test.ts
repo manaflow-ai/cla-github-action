@@ -46,6 +46,15 @@ describe('getInputs wrappers', () => {
     expect(inputs.getBranch()).toBe('')
   })
 
+  it('defaults the action mode to the write-capable signing path', () => {
+    expect(inputs.getMode()).toBe('sign')
+  })
+
+  it('reads the explicit signer preflight mode', () => {
+    setInput('mode', 'signer-preflight')
+    expect(inputs.getMode()).toBe('signer-preflight')
+  })
+
   it('defaults the required base branch to main', () => {
     expect(inputs.getRequiredBaseRef()).toBe('main')
   })

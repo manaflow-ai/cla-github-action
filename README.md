@@ -152,6 +152,8 @@ The sample lets any authenticated human Pull Request commenter use `recheck` onl
 
 The action exposes `signature_recorded=true` only after it persists a new signature. The sample gives the action step an ID and publishes this as `needs.CLAAssistant.outputs.signature_recorded` for a trusted later job in the same workflow. That rerun job may use the output only after it binds the exact failed check to the current Pull Request number, head SHA, base branch, and workflow. A separate workflow cannot consume a job output directly and needs an authenticated handoff. Do not authorize a rerun from an arbitrary signing comment when this output is false.
 
+For a least-privilege admission gate, run the action with `mode: signer-preflight` in a separate job that has only `contents: read`, `pull-requests: read`, and `issues: read`. The GraphQL commit identity connection requires `contents: read` in private repositories. The mode re-fetches the live Pull Request, resolves the current author/co-author/committer identities through the same bounded GraphQL query as the signer, and verifies the event comment against the canonical unedited comment. It sets `signer_authorized=true` only for a matching account ID. It does not read or write the signature ledger, create or edit comments, or lock the Pull Request. The write-capable signer must still perform its own live validation after the gate because a preflight output is an ephemeral admission result, not a durable authorization token.
+
 The action publishes an all-signed bot comment only after it revalidates the signing comments and persists any new signatures. If a signer edits or deletes the declaration during the run, the ledger and the previous trusted bot status stay unchanged.
 
 If the signature ledger does not exist, the first run creates an empty ledger and leaves any declaration from that run pending. Post a new `recheck` comment after the ledger exists. The action then validates and records the prior exact declaration before it publishes all-signed status.
@@ -283,6 +285,7 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
 
 | Name                  | Requirement | Description | Example |
 | --------------------- | ----------- | ----------- | ------- |
+| `mode`                 | _optional_  | `sign` (default) runs the ledger-backed signer. `signer-preflight` performs read-only live Pull Request and exact-comment identity admission and emits `signer_authorized`; it never writes the ledger or Pull Request comments. Use it in a gate with only `contents: read`, `pull-requests: read`, and `issues: read`. | sign |
 | `path-to-document`     | _required_ | Non-empty absolute HTTPS URL of the CLA or DCO document. The action validates it before any GitHub write. | `<REPLACE_WITH_CLA_URL>` |
 | `path-to-signatures`       | _optional_ |  Path to the JSON file where  all the signatures of the contributors will be stored inside the repository. | signatures/version1/cla.json |
 | `branch`   | _optional_ |  Branch in which all the signatures of the contributors will be stored and Default branch is `master`.  | master |
@@ -305,6 +308,7 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
 
 | Name                  | Description |
 | --------------------- | ----------- |
+| `signer_authorized` | In `signer-preflight` mode, set to `'true'` only when the current newly-created, exact, unedited declaration is authored by an authenticated identity in the live Pull Request's author, co-author, committer, or opener set. The write-capable signer must repeat its live checks; this output is not a bearer authorization token. |
 | `opener_not_in_commits` | Set to `'true'` when the Pull Request opener is not recorded as an author or co-author of any commit in the PR. Emitted regardless of whether `require-opener-as-author` caused the check to fail. |
 | `signature_recorded` | Set to `'true'` only after this run persists a new signature in the ledger. |
 

@@ -1,5 +1,14 @@
 import * as core from '@actions/core'
 
+/**
+ * Selects the action execution path. The normal `sign` mode retains the
+ * historical ledger/comment behavior. `signer-preflight` performs only the
+ * read-only identity and comment checks needed by an unprivileged workflow
+ * gate.
+ */
+export const getMode = (): string =>
+  core.getInput('mode', { required: false }).trim() || 'sign'
+
 export const getRemoteRepoName = (): string => {
   return core.getInput('remote-repository-name', { required: false })
 }

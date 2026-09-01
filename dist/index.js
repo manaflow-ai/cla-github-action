@@ -48076,6 +48076,13 @@ function getIDToken(aud) {
 //# sourceMappingURL=core.js.map
 ;// CONCATENATED MODULE: ./src/shared/getInputs.ts
 
+/**
+ * Selects the action execution path. The normal `sign` mode retains the
+ * historical ledger/comment behavior. `signer-preflight` performs only the
+ * read-only identity and comment checks needed by an unprivileged workflow
+ * gate.
+ */
+const getMode = () => getInput('mode', { required: false }).trim() || 'sign';
 const getRemoteRepoName = () => {
     return getInput('remote-repository-name', { required: false });
 };
@@ -48722,7 +48729,7 @@ async function signatureWithPRComment(committerMap, committers, preloadedComment
 function isUneditedComment(createdAt, updatedAt) {
     return Boolean(createdAt && updatedAt && createdAt === updatedAt);
 }
-function isCommentSignedByUser(comment, commentAuthor, actorType, commentAuthorId) {
+function isCommentSignedByUser(comment, commentAuthor, actorType, commentAuthorId, signPhrase = getPrSignComment()) {
     if (actorType !== 'User' ||
         !Number.isSafeInteger(commentAuthorId) ||
         (commentAuthorId ?? 0) <= 0 ||
@@ -48730,7 +48737,7 @@ function isCommentSignedByUser(comment, commentAuthor, actorType, commentAuthorI
         commentAuthor.toLowerCase().endsWith('[bot]')) {
         return false;
     }
-    return commentContainsSignature(comment, getPrSignComment());
+    return commentContainsSignature(comment, signPhrase);
 }
 /**
  * Decide whether a PR comment counts as signing the CLA/DCO.
@@ -49361,6 +49368,51 @@ function validatePayloadAgainstLive(live, repository) {
     }
 }
 
+;// CONCATENATED MODULE: ./src/shared/committers.ts
+/**
+ * Include the authenticated Pull Request opener as a contributor when the
+ * opener is not present in git metadata. Git author and committer fields are
+ * assertions, so the live Pull Request identity must remain a separate
+ * contributor even when the commit list is otherwise complete.
+ */
+function includePullRequestOpener(committers, opener, pullRequestNo) {
+    const existing = committers.find(committer => committer.id === opener.id);
+    if (existing) {
+        existing.isPullRequestOpener = true;
+        return committers;
+    }
+    return [
+        {
+            name: opener.login,
+            id: opener.id,
+            pullRequestNo,
+            isPullRequestOpener: true
+        },
+        ...committers
+    ];
+}
+/**
+ * Return an authenticated opener mismatch when no primary-author or
+ * co-author identity in the current commit set has the opener's account ID.
+ * Committer-only matches do not qualify because the committer field is still
+ * attacker-controlled git metadata.
+ */
+function findOpenerAuthorshipMismatch(commitAuthors, opener) {
+    const authorshipIdentities = commitAuthors.filter(committer => committer.isPrimaryAuthor || committer.isCoAuthor);
+    if (authorshipIdentities.some(committer => committer.id === opener.id)) {
+        return undefined;
+    }
+    return {
+        opener: opener.login,
+        commitAuthors: authorshipIdentities
+            .map(committer => committer.name)
+            .filter(name => name.length > 0)
+    };
+}
+function openerAuthorshipMismatchMessage(mismatch) {
+    return `Pull Request opener @${mismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`;
+}
+
 ;// CONCATENATED MODULE: ./src/pullrequest/signingCommentSnapshot.ts
 
 
@@ -49436,6 +49488,7 @@ function isCurrentSignature(comment) {
 
 
 
+
 async function setupClaCheck() {
     // A caller may use this output to authorize a follow-up check refresh. Keep
     // it false unless this run actually persists a newly accepted signature.
@@ -49447,7 +49500,7 @@ async function setupClaCheck() {
     let committerMap = getInitialCommittersMap();
     const commitAuthors = await getCommitters(livePullRequest.headSha);
     const openerMismatch = detectOpenerMismatch(commitAuthors, livePullRequest.opener);
-    let committers = includePullRequestOpener(commitAuthors, livePullRequest.opener);
+    let committers = includePullRequestOpener(commitAuthors, livePullRequest.opener, github_context.issue.number);
     committers = checkAllowList(committers);
     if (openerMismatch) {
         // The missing-ledger bootstrap path publishes the first bot comment before
@@ -49657,29 +49710,7 @@ const getInitialCommittersMap = () => ({
     unknown: []
 });
 function openerMismatchError(mismatch) {
-    return `Pull Request opener @${mismatch.opener} is not recorded as an author or co-author of any commit in this PR. If this is intentional (e.g. a cherry-pick or release-engineering workflow), set the 'require-opener-as-author' action input to 'false'.`;
-}
-/**
- * Prepend the PR opener to the committer set if they are not already present
- * via a commit or Co-authored-by trailer. The PR submitter is a contributor
- * to the merge in their own right and must sign the CLA, even if every commit
- * was authored by someone else.
- */
-function includePullRequestOpener(committers, opener) {
-    const existing = committers.find(c => c.id === opener.id);
-    if (existing) {
-        existing.isPullRequestOpener = true;
-        return committers;
-    }
-    return [
-        {
-            name: opener.login,
-            id: opener.id,
-            pullRequestNo: github_context.issue.number,
-            isPullRequestOpener: true
-        },
-        ...committers
-    ];
+    return openerAuthorshipMismatchMessage(mismatch);
 }
 /**
  * Return {opener, commitAuthors, hardFail} if the PR opener is NOT recorded
@@ -49693,15 +49724,12 @@ function includePullRequestOpener(committers, opener) {
  * decide whether to call setFailed vs just render a warning.
  */
 function detectOpenerMismatch(commitAuthors, opener) {
-    const authorshipIdentities = commitAuthors.filter(committer => committer.isPrimaryAuthor || committer.isCoAuthor);
-    if (authorshipIdentities.some(c => c.id === opener.id))
+    const mismatch = findOpenerAuthorshipMismatch(commitAuthors, opener);
+    if (!mismatch)
         return undefined;
     setOutput('opener_not_in_commits', true);
     return {
-        opener: opener.login,
-        commitAuthors: authorshipIdentities
-            .map(c => c.name)
-            .filter(n => n.length > 0),
+        ...mismatch,
         hardFail: requireOpenerAsAuthor()
     };
 }
@@ -49747,7 +49775,136 @@ function requireHttpsDocumentUrl() {
     return documentUrl;
 }
 
+;// CONCATENATED MODULE: ./src/signerPreflight.ts
+
+
+
+
+
+
+
+
+
+/**
+ * Authenticate the current signing comment without invoking any ledger or
+ * Pull Request write. The write-capable action must still repeat all live
+ * checks before accepting a signature; this result is only an admission
+ * signal for a least-privilege workflow gate.
+ */
+async function runSignerPreflight() {
+    setOutput('signer_authorized', false);
+    const livePullRequest = await validateLivePullRequest();
+    const eventComment = readEventComment();
+    const signPhrase = getPrSignComment();
+    if (!commentMatchesPhrase(eventComment, signPhrase)) {
+        info('The current Pull Request comment is not the configured exact signing declaration.');
+        return;
+    }
+    const comments = await listBoundedPullRequestComments();
+    const canonicalComment = findCanonicalComment(comments, eventComment);
+    if (!canonicalComment) {
+        throw new Error('The current signing comment is missing from the live Pull Request; refusing signer admission');
+    }
+    if (!sameEventComment(eventComment, canonicalComment)) {
+        throw new Error('The current signing comment changed while the preflight was starting; refusing signer admission');
+    }
+    if (!isUneditedComment(canonicalComment.created_at, canonicalComment.updated_at)) {
+        throw new Error('The current signing comment was edited; post a new exact declaration');
+    }
+    const commitAuthors = await getCommitters(livePullRequest.headSha);
+    const openerMismatch = findOpenerAuthorshipMismatch(commitAuthors, livePullRequest.opener);
+    if (openerMismatch) {
+        setOutput('opener_not_in_commits', true);
+    }
+    if (openerMismatch && requireOpenerAsAuthor()) {
+        setFailed(openerAuthorshipMismatchMessage(openerMismatch));
+        return;
+    }
+    const committers = includePullRequestOpener(commitAuthors, livePullRequest.opener, github_context.issue.number);
+    const committerMap = {
+        signed: [],
+        notSigned: committers,
+        unknown: []
+    };
+    const reaction = await signatureWithPRComment(committerMap, committers, [
+        canonicalComment
+    ]);
+    const authorized = reaction.newSigned.some(signer => signer.id === eventComment.user.id);
+    setOutput('signer_authorized', authorized);
+    if (!authorized) {
+        setFailed('The signing comment is not authored by an authenticated identity in the current Pull Request');
+    }
+}
+function readEventComment() {
+    if (github_context.eventName !== 'issue_comment' ||
+        github_context.payload.action !== 'created') {
+        throw new Error('signer-preflight only accepts a newly created issue_comment event');
+    }
+    const value = github_context.payload.comment;
+    if (!value || typeof value !== 'object') {
+        throw new Error('The issue-comment payload has no verified comment; refusing signer admission');
+    }
+    const comment = value;
+    const user = comment.user;
+    if (!isPositiveSafeInteger(comment.id) ||
+        typeof comment.body !== 'string' ||
+        !user ||
+        !isPositiveSafeInteger(user.id) ||
+        typeof user.login !== 'string' ||
+        user.login.trim().length === 0 ||
+        typeof user.type !== 'string') {
+        throw new Error('The issue-comment payload has no complete authenticated commenter identity');
+    }
+    if (typeof comment.created_at !== 'undefined' &&
+        typeof comment.created_at !== 'string') {
+        throw new Error('The issue-comment creation timestamp is malformed');
+    }
+    if (typeof comment.updated_at !== 'undefined' &&
+        typeof comment.updated_at !== 'string') {
+        throw new Error('The issue-comment update timestamp is malformed');
+    }
+    return {
+        id: comment.id,
+        body: comment.body,
+        user: { id: user.id, login: user.login, type: user.type },
+        ...(typeof comment.created_at === 'string'
+            ? { createdAt: comment.created_at }
+            : {}),
+        ...(typeof comment.updated_at === 'string'
+            ? { updatedAt: comment.updated_at }
+            : {})
+    };
+}
+function commentMatchesPhrase(comment, phrase) {
+    return isCommentSignedByUser(comment.body, comment.user.login, comment.user.type, comment.user.id, phrase);
+}
+function findCanonicalComment(comments, eventComment) {
+    return comments.find(comment => comment.id === eventComment.id);
+}
+function sameEventComment(eventComment, canonicalComment) {
+    const user = canonicalComment.user;
+    if (!user ||
+        user.id !== eventComment.user.id ||
+        user.type !== eventComment.user.type ||
+        canonicalComment.body !== eventComment.body) {
+        return false;
+    }
+    if (eventComment.createdAt !== undefined &&
+        eventComment.createdAt !== canonicalComment.created_at) {
+        return false;
+    }
+    if (eventComment.updatedAt !== undefined &&
+        eventComment.updatedAt !== canonicalComment.updated_at) {
+        return false;
+    }
+    return true;
+}
+function isPositiveSafeInteger(value) {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
 ;// CONCATENATED MODULE: ./src/main.ts
+
 
 
 
@@ -49758,7 +49915,17 @@ function requireHttpsDocumentUrl() {
 async function run() {
     try {
         info(`CLA Assistant GitHub Action bot has started the process`);
+        setOutput('signature_recorded', false);
+        setOutput('signer_authorized', false);
         requireHttpsDocumentUrl();
+        const mode = getMode();
+        if (mode === 'signer-preflight') {
+            await runSignerPreflight();
+            return;
+        }
+        if (mode !== 'sign') {
+            throw new Error(`Unsupported action mode '${mode}'. Use 'sign' or 'signer-preflight'.`);
+        }
         if (github_context.payload.action === 'closed') {
             if (lockPullRequestAfterMerge() &&
                 github_context.payload.pull_request?.merged) {

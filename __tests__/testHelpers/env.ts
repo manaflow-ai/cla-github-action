@@ -24,6 +24,7 @@ export function setDefaultInputs(
   overrides: Partial<Record<string, string>> = {}
 ): void {
   const defaults: Record<string, string> = {
+    mode: 'sign',
     'path-to-signatures': 'signatures/v1/cla.json',
     'path-to-document': 'https://example.com/cla',
     branch: 'main',

@@ -94,7 +94,8 @@ export function isCommentSignedByUser(
   comment: string,
   commentAuthor: string,
   actorType?: string,
-  commentAuthorId?: number
+  commentAuthorId?: number,
+  signPhrase = getPrSignComment()
 ): boolean {
   if (
     actorType !== 'User' ||
@@ -105,7 +106,7 @@ export function isCommentSignedByUser(
   ) {
     return false
   }
-  return commentContainsSignature(comment, getPrSignComment())
+  return commentContainsSignature(comment, signPhrase)
 }
 
 /**

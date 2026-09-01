@@ -6,12 +6,26 @@ import * as core from '@actions/core'
 import * as input from './shared/getInputs'
 import { validateMergedPullRequestForLock } from './livePullRequest'
 import { requireHttpsDocumentUrl } from './shared/documentUrl'
+import { runSignerPreflight } from './signerPreflight'
 
 export async function run() {
   try {
     core.info(`CLA Assistant GitHub Action bot has started the process`)
+    core.setOutput('signature_recorded', false)
+    core.setOutput('signer_authorized', false)
 
     requireHttpsDocumentUrl()
+
+    const mode = input.getMode()
+    if (mode === 'signer-preflight') {
+      await runSignerPreflight()
+      return
+    }
+    if (mode !== 'sign') {
+      throw new Error(
+        `Unsupported action mode '${mode}'. Use 'sign' or 'signer-preflight'.`
+      )
+    }
 
     if (context.payload.action === 'closed') {
       if (
