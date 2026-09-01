@@ -48275,6 +48275,11 @@ const MAX_PULL_REQUEST_COMMITS = 1000;
 const MAX_AUTHORS_PER_COMMIT = 100;
 const MAX_GIT_IDENTITY_ASSERTIONS = MAX_PULL_REQUEST_COMMITS * (MAX_AUTHORS_PER_COMMIT + 1);
 const MAX_PULL_REQUEST_COMMENTS = 1000;
+// Bound contributor-controlled comment bodies before the action retains a
+// complete paginated history. Counts use UTF-8 bytes, not JavaScript code
+// units, so the limit matches the data sent over the GitHub API.
+const MAX_PULL_REQUEST_COMMENT_BODY_BYTES = 65_536;
+const MAX_PULL_REQUEST_COMMENT_BYTES = 10_000_000;
 const MAX_LEDGER_SIGNATURES = 10_000;
 // GitHub's Contents API only supports files up to 1 MB.
 const MAX_LEDGER_BYTES = 1_000_000;
@@ -48684,6 +48689,7 @@ class PullRequestCommentLimitError extends Error {
  */
 async function listBoundedPullRequestComments() {
     let observed = 0;
+    let observedBodyBytes = 0;
     return octokit.paginate(octokit.rest.issues.listComments, {
         owner: github_context.repo.owner,
         repo: github_context.repo.repo,
@@ -48691,9 +48697,27 @@ async function listBoundedPullRequestComments() {
         per_page: 100
     }, response => {
         const page = response.data;
-        observed += page.length;
-        if (observed > MAX_PULL_REQUEST_COMMENTS) {
-            throw new PullRequestCommentLimitError(`A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`);
+        if (!Array.isArray(page)) {
+            throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment page. The action will fail closed.');
+        }
+        for (const comment of page) {
+            if (observed >= MAX_PULL_REQUEST_COMMENTS) {
+                throw new PullRequestCommentLimitError(`A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`);
+            }
+            observed += 1;
+            if (comment.body !== undefined &&
+                comment.body !== null &&
+                typeof comment.body !== 'string') {
+                throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment body. The action will fail closed.');
+            }
+            const bodyBytes = Buffer.byteLength(comment.body ?? '', 'utf8');
+            if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BODY_BYTES) {
+                throw new PullRequestCommentLimitError(`A Pull Request comment body exceeds ${MAX_PULL_REQUEST_COMMENT_BODY_BYTES} bytes. The action will fail closed.`);
+            }
+            if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BYTES - observedBodyBytes) {
+                throw new PullRequestCommentLimitError(`The combined Pull Request comment bodies exceed ${MAX_PULL_REQUEST_COMMENT_BYTES} bytes. The action will fail closed.`);
+            }
+            observedBodyBytes += bodyBytes;
         }
         return page;
     });

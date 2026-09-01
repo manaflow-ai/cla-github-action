@@ -81,7 +81,7 @@ describe('bounded Pull Request comment payloads', () => {
     })
 
     await expect(listComments()).rejects.toThrow(
-      /combined comment bodies exceed 10000000 bytes/i
+      /combined .*comment bodies exceed 10000000 bytes/i
     )
 
     expect(writeRequests(fake)).toEqual([])
@@ -121,7 +121,7 @@ describe('bounded Pull Request comment payloads', () => {
       payload: { repository: { id: repository.state.id } }
     })
 
-    await expect(listComments()).rejects.toThrow(/invalid comment body/i)
+    await expect(listComments()).rejects.toThrow(/invalid .*comment body/i)
 
     expect(writeRequests(fake)).toEqual([])
   })
