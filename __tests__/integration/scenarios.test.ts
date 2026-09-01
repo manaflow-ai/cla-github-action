@@ -391,6 +391,57 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('fails a writer run when the preflight head is stale before any write', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    setInput('expected-head-sha', 'preflight-headsha')
+    repository.addPullRequest({
+      number: 31,
+      head: { sha: 'live-headsha', ref: 'feature/stale-preflight' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    repository.setFile('signatures/cla.json', {
+      signedContributors: []
+    })
+    repository.addComment(31, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 31,
+      actor: 'alice',
+      eventName: 'issue_comment',
+      payload: {
+        action: 'created',
+        comment: {
+          body: 'I have read the CLA Document and I hereby sign the CLA',
+          user: { login: 'alice', id: 1001, type: 'User' }
+        },
+        repository: { id: repository.state.id },
+        issue: { number: 31, state: 'open', pull_request: {} }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /expected head commit preflight-headsha does not match the live pull request head live-headsha/i
+    )
+    expect(repository.getFile('signatures/cla.json')).toEqual({
+      signedContributors: []
+    })
+    expect(repository.listComments(31)).toHaveLength(1)
+    expect(
+      fake.requestLog.filter(request =>
+        request.method !== 'GET' && !request.path.endsWith('/graphql')
+      )
+    ).toEqual([])
+    watch.restore()
+  })
+
   it('does not reuse a prior signature for a forged non-opener primary author', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({

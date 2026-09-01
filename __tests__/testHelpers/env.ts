@@ -29,6 +29,7 @@ export function setDefaultInputs(
     'path-to-document': 'https://example.com/cla',
     branch: 'main',
     'required-base-ref': 'main',
+    'expected-head-sha': '',
     allowlist: '',
     'allowlist-ids': '',
     'remote-organization-name': '',

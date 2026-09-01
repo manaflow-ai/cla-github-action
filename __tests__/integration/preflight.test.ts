@@ -140,11 +140,72 @@ describe('signer-preflight mode', () => {
     await runAction()
 
     expect(watch.outputs).toContainEqual(['signer_authorized', true])
+    expect(watch.outputs).toContainEqual(['head_sha', 'headsha'])
     expect(watch.failures).toEqual([])
     expect(repository.listComments(7)).toHaveLength(1)
     expect(repository.getFile('signatures/cla.json')).toBeUndefined()
     expect(writeRequests()).toEqual([])
     expect(comment.body).toBe(SIGN_PHRASE)
+    watch.restore()
+  })
+
+  it('binds a writer run to the exact head observed by preflight', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest([
+      { author: { login: 'alice', id: 1001 } }
+    ])
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'alice',
+      id: 1001
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', true])
+    expect(watch.outputs).toContainEqual(['head_sha', 'headsha'])
+
+    const livePullRequest = repository.state.pulls.get(7)!
+    livePullRequest.head.sha = 'advanced-headsha'
+    setDefaultInputs({
+      mode: 'sign',
+      'expected-head-sha': 'headsha'
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /expected head commit headsha does not match the live pull request head advanced-headsha/i
+    )
+    expect(writeRequests()).toEqual([])
+    watch.restore()
+  })
+
+  it('rejects a stale expected head before signer-preflight identity reads', async () => {
+    const watch = watchCore()
+    const repository = addPullRequest([
+      { author: { login: 'alice', id: 1001 } }
+    ])
+    setDefaultInputs({
+      mode: 'signer-preflight',
+      'expected-head-sha': 'previous-headsha'
+    })
+    addCommentEvent({
+      repository,
+      pullRequestNumber: 7,
+      login: 'alice',
+      id: 1001
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signer_authorized', false])
+    expect(watch.outputs).not.toContainEqual(['head_sha', 'headsha'])
+    expect(watch.failures.join('\n')).toMatch(
+      /expected head commit previous-headsha does not match the live pull request head headsha/i
+    )
+    expect(writeRequests()).toEqual([])
     watch.restore()
   })
 
