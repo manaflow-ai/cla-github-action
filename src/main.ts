@@ -6,13 +6,14 @@ import * as core from '@actions/core'
 import * as input from './shared/getInputs'
 import { validateMergedPullRequestForLock } from './livePullRequest'
 import { requireHttpsDocumentUrl } from './shared/documentUrl'
-import { runSignerPreflight } from './signerPreflight'
+import { runSignerPreflight, setSignerDecision } from './signerPreflight'
 
 export async function run() {
   try {
     core.info(`CLA Assistant GitHub Action bot has started the process`)
     core.setOutput('signature_recorded', false)
     core.setOutput('signer_authorized', false)
+    setSignerDecision('error')
     core.setOutput('head_sha', '')
     core.setOutput('base_sha', '')
 

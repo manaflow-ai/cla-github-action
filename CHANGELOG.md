@@ -44,6 +44,10 @@ commit that introduced it.
   write-capable signer as `expected-base-sha` binds both jobs to the same live
   Pull Request base commit and fails closed after a base-branch advance between
   them.
+- `signer-preflight` now emits `signer_decision` as `authorized`,
+  `unauthorized`, or `error`. Only an exact current declaration rejected by
+  identity policy is `unauthorized`; live, API, schema, and pagination failures
+  remain `error`. The action still fails the job for both non-authorized states.
 - Signature comments must contain only the exact declaration. Appended text,
   changed case or punctuation, quotations, and bot comments do not count.
 - A declaration comment counts only when its GitHub creation and update

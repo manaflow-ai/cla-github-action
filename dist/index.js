@@ -49827,6 +49827,9 @@ function requireHttpsDocumentUrl() {
 
 
 
+function setSignerDecision(decision) {
+    setOutput('signer_decision', decision);
+}
 /**
  * Authenticate the current signing comment without invoking any ledger or
  * Pull Request write. The write-capable action must still repeat all live
@@ -49863,6 +49866,7 @@ async function runSignerPreflight() {
     if (openerMismatch &&
         requireOpenerAsAuthor() &&
         !isPullRequestOpenerAllowlisted(livePullRequest.opener)) {
+        setSignerDecision('unauthorized');
         setFailed(openerAuthorshipMismatchMessage(openerMismatch));
         return;
     }
@@ -49878,8 +49882,11 @@ async function runSignerPreflight() {
     const authorized = reaction.newSigned.some(signer => signer.id === eventComment.user.id);
     setOutput('signer_authorized', authorized);
     if (!authorized) {
+        setSignerDecision('unauthorized');
         setFailed('The signing comment is not authored by an authenticated identity in the current Pull Request');
+        return;
     }
+    setSignerDecision('authorized');
 }
 function readEventComment() {
     if (github_context.eventName !== 'issue_comment' ||
@@ -49963,6 +49970,7 @@ async function run() {
         info(`CLA Assistant GitHub Action bot has started the process`);
         setOutput('signature_recorded', false);
         setOutput('signer_authorized', false);
+        setSignerDecision('error');
         setOutput('head_sha', '');
         setOutput('base_sha', '');
         requireHttpsDocumentUrl();

@@ -83,6 +83,14 @@ outputs:
       the live Pull Request's author, co-author, committer, or opener set.
       This output is an admission result, not a replacement for the normal
       write-capable action's live revalidation.
+  signer_decision:
+    description: >
+      In signer-preflight mode, 'authorized' means the exact declaration was
+      accepted, 'unauthorized' means the exact current declaration failed a
+      documented identity policy, and 'error' means validation or a GitHub
+      request failed. The action still fails the job for both unauthorized and
+      error decisions. In sign mode this remains 'error' because the output is
+      not applicable.
   signature_recorded:
     description: >
       Set to 'true' only when this run accepted a new Pull Request signing

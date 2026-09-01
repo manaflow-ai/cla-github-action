@@ -20,6 +20,12 @@ import {
 import { getPrSignComment } from './shared/pr-sign-comment'
 import { requireOpenerAsAuthor } from './shared/getInputs'
 
+type SignerDecision = 'authorized' | 'unauthorized' | 'error'
+
+export function setSignerDecision(decision: SignerDecision): void {
+  core.setOutput('signer_decision', decision)
+}
+
 /**
  * Authenticate the current signing comment without invoking any ledger or
  * Pull Request write. The write-capable action must still repeat all live
@@ -75,6 +81,7 @@ export async function runSignerPreflight(): Promise<void> {
     requireOpenerAsAuthor() &&
     !isPullRequestOpenerAllowlisted(livePullRequest.opener)
   ) {
+    setSignerDecision('unauthorized')
     core.setFailed(openerAuthorshipMismatchMessage(openerMismatch))
     return
   }
@@ -98,10 +105,13 @@ export async function runSignerPreflight(): Promise<void> {
   core.setOutput('signer_authorized', authorized)
 
   if (!authorized) {
+    setSignerDecision('unauthorized')
     core.setFailed(
       'The signing comment is not authored by an authenticated identity in the current Pull Request'
     )
+    return
   }
+  setSignerDecision('authorized')
 }
 
 interface EventComment {
