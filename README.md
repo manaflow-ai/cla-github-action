@@ -36,7 +36,7 @@ on:
     types: [created]
   pull_request_target:
     branches: [main]
-    types: [opened,edited,closed,reopened,synchronize]
+    types: [opened,edited,closed,reopened,synchronize,ready_for_review]
 
 permissions: {}
 
@@ -46,7 +46,7 @@ jobs:
       (github.event_name == 'pull_request_target' &&
       (github.event.action == 'opened' || github.event.action == 'edited' ||
       github.event.action == 'closed' || github.event.action == 'reopened' ||
-      github.event.action == 'synchronize')) ||
+      github.event.action == 'synchronize' || github.event.action == 'ready_for_review')) ||
       (github.event_name == 'issue_comment' &&
       github.event.action == 'created' &&
       github.event.comment.user.type == 'User' &&
@@ -146,7 +146,7 @@ GitHub workflow event admission cannot compare a comment body case-sensitively. 
 
 The shell step and the action compare the raw comment body and do not trim whitespace. Contributors must post the declaration with no leading or trailing whitespace for it to count as an electronic signature. Keep the `pull_request_target.branches` filter and `required-base-ref` input set to the same protected branch. The event filter avoids unnecessary runs; the action input revalidates the live base branch before a write or lock.
 
-This version accepts signing and `recheck` only on newly created comments. A declaration comment must have matching GitHub creation and update timestamps. A comment edited into the declaration stays invalid on a later `recheck`. The workflow does not trigger on `issue_comment` `edited` events. The `pull_request_target` `edited` lifecycle event is admitted for the action's live validation. Do not add an issue-comment `edited` trigger unless a later action version validates the edited event and the exact updated declaration at runtime.
+This version accepts signing and `recheck` only on newly created comments. A declaration comment must have matching GitHub creation and update timestamps. A comment edited into the declaration stays invalid on a later `recheck`. The workflow does not trigger on `issue_comment` `edited` events. The `pull_request_target` `edited` and `ready_for_review` lifecycle events are admitted for the action's live validation. Do not add an issue-comment `edited` trigger unless a later action version validates the edited event and the exact updated declaration at runtime.
 
 The sample lets any authenticated human Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch. The signer sample remains advisory until that worker is installed.
 
@@ -214,7 +214,7 @@ The action re-fetches accepted signing comments immediately before a ledger writ
 
 #### 2. Pull Request event triggers CLA Workflow
 
-CLA action workflow will be triggered on Pull Request `opened, edited, closed, reopened, synchronize` events. This workflow will always run in the base repository and that's why we are making use of the [pull_request_target](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request_target) event. The action validates the live Pull Request state, opener, base repository ID, base branch, head repository ID, head branch, and head commit before it writes signature data.
+CLA action workflow will be triggered on Pull Request `opened, edited, closed, reopened, synchronize, ready_for_review` events. This workflow will always run in the base repository and that's why we are making use of the [pull_request_target](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#pull_request_target) event. The action validates the live Pull Request state, opener, base repository ID, base branch, head repository ID, head branch, and head commit before it writes signature data.
 
 The action fails closed for every unlinked committer, including metadata that claims to be `GitHub <noreply@github.com>` or `web-flow`. Git names and email addresses are not authenticated and can be forged. `allowlist-ids` cannot match an unresolved identity.
 

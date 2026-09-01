@@ -13,6 +13,11 @@ commit that introduced it.
 
 ### Security
 
+- `pull_request_target` `ready_for_review` events are now admitted for the
+  same live Pull Request identity and base-branch checks as other open
+  lifecycle events. This lets a draft Pull Request receive its CLA check when
+  it becomes ready without broadening issue-comment handling.
+
 - Added a `signer-preflight` mode for least-privilege workflows. It reuses the
   live Pull Request and bounded GraphQL identity checks, authenticates the
   current exact unedited signing comment by numeric account ID, emits

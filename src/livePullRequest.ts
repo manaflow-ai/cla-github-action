@@ -22,7 +22,8 @@ const OPEN_PULL_REQUEST_TARGET_ACTIONS = new Set([
   'opened',
   'edited',
   'reopened',
-  'synchronize'
+  'synchronize',
+  'ready_for_review'
 ])
 
 /**

@@ -1956,6 +1956,83 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('accepts a ready_for_review event for an open Pull Request', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    repository.addPullRequest({
+      number: 25,
+      head: { sha: 'headsha', ref: 'feature/ready' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    repository.setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 25,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'ready_for_review',
+        pull_request: {
+          number: 25,
+          state: 'open',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: repository.state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures).toEqual([])
+    expect(repository.listComments(25)[0]!.body).toMatch(
+      /all contributors have signed the cla/i
+    )
+    watch.restore()
+  })
+
+  it('keeps live identity checks for ready_for_review events', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    repository.addPullRequest({
+      number: 26,
+      head: { sha: 'headsha', ref: 'feature/ready-identity' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    repository.setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 26,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'ready_for_review',
+        pull_request: {
+          number: 26,
+          state: 'open',
+          user: { login: 'alice', id: 1001 },
+          head: { sha: 'forged-head' }
+        },
+        repository: { id: repository.state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /payload does not match the live Pull Request identity/i
+    )
+    expect(repository.listComments(26)).toHaveLength(0)
+    watch.restore()
+  })
+
   it('revalidates the live Pull Request immediately before a success result', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
