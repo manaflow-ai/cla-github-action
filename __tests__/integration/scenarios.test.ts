@@ -153,6 +153,69 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('writer uses only the signing comment authenticated by preflight', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    repository.addPullRequest({
+      number: 47,
+      head: { sha: 'headsha', ref: 'feature/comment-binding' },
+      user: { login: 'alice', id: 1001 },
+      commits: [
+        { author: { login: 'alice', id: 1001 } },
+        { author: { login: 'bob', id: 2002 } }
+      ]
+    })
+    repository.setFile('signatures/cla.json', {
+      signedContributors: []
+    })
+    const preflightComment = repository.addComment(47, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    repository.addComment(47, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'bob', id: 2002, type: 'User' }
+    })
+    setInput('expected-comment-id', String(preflightComment.id))
+    setInput('expected-comment-created-at', preflightComment.created_at)
+    setInput('expected-comment-author-id', String(preflightComment.user.id))
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 47,
+      actor: 'alice',
+      eventName: 'issue_comment',
+      payload: {
+        action: 'created',
+        issue: { number: 47, state: 'open', pull_request: {} },
+        comment: {
+          id: preflightComment.id,
+          body: preflightComment.body,
+          user: preflightComment.user,
+          created_at: preflightComment.created_at,
+          updated_at: preflightComment.updated_at
+        },
+        repository: { id: repository.state.id, full_name: 'acme/widgets' }
+      }
+    })
+
+    await runAction()
+
+    const signatures = repository.getFile('signatures/cla.json') as {
+      signedContributors: Array<Record<string, unknown>>
+    }
+    expect(signatures.signedContributors).toEqual([
+      expect.objectContaining({
+        name: 'alice',
+        id: 1001,
+        comment_id: preflightComment.id,
+        created_at: preflightComment.created_at
+      })
+    ])
+    expect(watch.failures.join('\n')).toMatch(/have to sign the CLA/i)
+    watch.restore()
+  })
+
   it('records a valid signature when an untrusted comment spoofs the bot marker', async () => {
     const watch = watchCore()
     const repository = fake.repo('acme', 'widgets')
