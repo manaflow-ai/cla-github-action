@@ -48097,6 +48097,11 @@ const getBranch = () => getInput('branch', { required: false });
  * Empty means that the action uses its normal live Pull Request validation.
  */
 const getExpectedHeadSha = () => getInput('expected-head-sha', { required: false }).trim();
+/**
+ * Optional immutable base binding supplied by a read-only preflight job.
+ * Empty means that the action uses its normal live Pull Request validation.
+ */
+const getExpectedBaseSha = () => getInput('expected-base-sha', { required: false }).trim();
 const getRequiredBaseRef = () => getInput('required-base-ref', { required: false }) || 'main';
 const getAllowListItem = () => getInput('allowlist', { required: false });
 const getAllowListIds = () => getInput('allowlist-ids', { required: false });
@@ -49213,6 +49218,7 @@ async function validateLivePullRequest(expected) {
     const pullRequest = response.data;
     const liveRepository = pullRequest.base.repo?.full_name;
     const liveRepositoryId = pullRequest.base.repo?.id;
+    const liveBaseSha = pullRequest.base.sha;
     const liveHeadRepository = pullRequest.head.repo?.full_name;
     const liveHeadRepositoryId = pullRequest.head.repo?.id;
     const requiredBaseRef = getRequiredBaseRef();
@@ -49233,6 +49239,13 @@ async function validateLivePullRequest(expected) {
     if (requiredBaseRef && pullRequest.base.ref !== requiredBaseRef) {
         throw new Error(`Live Pull Request base branch is '${pullRequest.base.ref}', not '${requiredBaseRef}'; refusing a CLA signature write`);
     }
+    if (!liveBaseSha?.trim() ||
+        !pullRequest.base.ref?.trim() ||
+        !liveRepository?.trim() ||
+        !Number.isSafeInteger(liveRepositoryId) ||
+        Number(liveRepositoryId) <= 0) {
+        throw new Error('Live Pull Request base has no complete repository or commit identity; refusing a CLA signature write');
+    }
     if (!pullRequest.head.sha?.trim() ||
         !pullRequest.head.ref?.trim() ||
         !liveHeadRepository?.trim() ||
@@ -49251,6 +49264,7 @@ async function validateLivePullRequest(expected) {
         headRef: pullRequest.head.ref,
         headRepository: liveHeadRepository,
         headRepositoryId: Number(liveHeadRepositoryId),
+        baseSha: liveBaseSha,
         baseRef: pullRequest.base.ref,
         baseRepository: liveRepository,
         baseRepositoryId: Number(liveRepositoryId),
@@ -49260,12 +49274,17 @@ async function validateLivePullRequest(expected) {
     if (expectedHeadSha && snapshot.headSha !== expectedHeadSha) {
         throw new Error('Live Pull Request head does not match expected-head-sha; refusing CLA processing');
     }
+    const expectedBaseSha = getExpectedBaseSha();
+    if (expectedBaseSha && snapshot.baseSha !== expectedBaseSha) {
+        throw new Error('Live Pull Request base does not match expected-base-sha; refusing CLA processing');
+    }
     if (expected &&
         (snapshot.headSha !== expected.headSha ||
             snapshot.headRef !== expected.headRef ||
             snapshot.headRepository.toLowerCase() !==
                 expected.headRepository.toLowerCase() ||
             snapshot.headRepositoryId !== expected.headRepositoryId ||
+            snapshot.baseSha !== expected.baseSha ||
             snapshot.baseRef !== expected.baseRef ||
             snapshot.baseRepository.toLowerCase() !==
                 expected.baseRepository.toLowerCase() ||
@@ -49381,6 +49400,8 @@ function validatePayloadAgainstLive(live, repository) {
             live.headRepository.toLowerCase() ||
         pullRequest.head.repo?.id !== live.headRepositoryId ||
         pullRequest.base?.ref !== live.baseRef ||
+        (pullRequest.base?.sha !== undefined &&
+            pullRequest.base.sha !== live.baseSha) ||
         pullRequest.base.repo?.full_name?.toLowerCase() !==
             repository.toLowerCase() ||
         pullRequest.base.repo?.id !== live.baseRepositoryId) {
@@ -49816,6 +49837,7 @@ async function runSignerPreflight() {
     setOutput('signer_authorized', false);
     const livePullRequest = await validateLivePullRequest();
     setOutput('head_sha', livePullRequest.headSha);
+    setOutput('base_sha', livePullRequest.baseSha);
     const eventComment = readEventComment();
     const signPhrase = getPrSignComment();
     if (!commentMatchesPhrase(eventComment, signPhrase)) {
@@ -49942,6 +49964,7 @@ async function run() {
         setOutput('signature_recorded', false);
         setOutput('signer_authorized', false);
         setOutput('head_sha', '');
+        setOutput('base_sha', '');
         requireHttpsDocumentUrl();
         const mode = getMode();
         if (mode === 'signer-preflight') {

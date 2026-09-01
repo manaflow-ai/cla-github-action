@@ -443,6 +443,63 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('fails a writer run when the preflight base is stale before any write', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    setInput('expected-base-sha', 'preflight-base-sha')
+    repository.addPullRequest({
+      number: 32,
+      head: { sha: 'live-headsha', ref: 'feature/stale-base' },
+      base: {
+        ref: 'main',
+        repoFullName: 'acme/widgets',
+        sha: 'live-base-sha'
+      },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    repository.setFile('signatures/cla.json', {
+      signedContributors: []
+    })
+    repository.addComment(32, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 32,
+      actor: 'alice',
+      eventName: 'issue_comment',
+      payload: {
+        action: 'created',
+        comment: {
+          body: 'I have read the CLA Document and I hereby sign the CLA',
+          user: { login: 'alice', id: 1001 }
+        },
+        repository: { id: repository.state.id },
+        issue: { number: 32, state: 'open', pull_request: {} }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /live pull request base does not match expected-base-sha/i
+    )
+    expect(repository.getFile('signatures/cla.json')).toEqual({
+      signedContributors: []
+    })
+    expect(repository.listComments(32)).toHaveLength(1)
+    expect(
+      fake.requestLog.filter(
+        request =>
+          request.method !== 'GET' && !request.path.endsWith('/graphql')
+      )
+    ).toEqual([])
+    watch.restore()
+  })
+
   it('does not reuse a prior signature for a forged non-opener primary author', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({

@@ -33,6 +33,13 @@ export const getBranch = (): string =>
 export const getExpectedHeadSha = (): string =>
   core.getInput('expected-head-sha', { required: false }).trim()
 
+/**
+ * Optional immutable base binding supplied by a read-only preflight job.
+ * Empty means that the action uses its normal live Pull Request validation.
+ */
+export const getExpectedBaseSha = (): string =>
+  core.getInput('expected-base-sha', { required: false }).trim()
+
 export const getRequiredBaseRef = (): string =>
   core.getInput('required-base-ref', { required: false }) || 'main'
 

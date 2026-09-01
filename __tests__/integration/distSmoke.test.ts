@@ -63,6 +63,7 @@ function defaultInputEnv(
     INPUT_BRANCH: 'main',
     'INPUT_REQUIRED-BASE-REF': 'main',
     'INPUT_EXPECTED-HEAD-SHA': '',
+    'INPUT_EXPECTED-BASE-SHA': '',
     INPUT_ALLOWLIST: '',
     'INPUT_ALLOWLIST-IDS': '',
     'INPUT_USE-DCO-FLAG': 'false',
@@ -294,6 +295,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
     expect(result.code).toBe(0)
     expect(result.stdout).toMatch(/signer_authorized::true/)
     expect(result.stdout).toMatch(/head_sha::headsha/)
+    expect(result.stdout).toMatch(/base_sha::base-sha/)
     expect(repository.listComments(17)).toHaveLength(1)
     expect(repository.getFile('signatures/cla.json')).toBeUndefined()
     expect(

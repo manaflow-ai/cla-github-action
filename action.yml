@@ -27,6 +27,12 @@ inputs:
       read-only signer-preflight. When set, both signer-preflight and the
       write-capable signer fail closed if the live head differs.
     default: ""
+  expected-base-sha:
+    description: >
+      Optional exact live Pull Request base commit SHA observed by a preceding
+      read-only signer-preflight. When set, both signer-preflight and the
+      write-capable signer fail closed if the live base differs.
+    default: ""
   allowlist:
     description: "Deprecated and ignored. Raw names, emails, and globs can be spoofed in commit metadata."
     default: ""
@@ -94,6 +100,11 @@ outputs:
       In signer-preflight mode, the exact live Pull Request head commit SHA
       observed after validation. Pass this value as 'expected-head-sha' to the
       write-capable signer so a force-push between jobs fails closed.
+  base_sha:
+    description: >
+      In signer-preflight mode, the exact live Pull Request base commit SHA
+      observed after validation. Pass this value as 'expected-base-sha' to the
+      write-capable signer so a base-branch advance between jobs fails closed.
 runs:
   using: "node24"
   main: 'dist/index.js'
