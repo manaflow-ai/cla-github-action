@@ -37,6 +37,7 @@ export async function listBoundedPullRequestComments(): Promise<
           'GitHub returned an invalid Pull Request comment page. The action will fail closed.'
         )
       }
+      const boundedPage: PullRequestComment[] = []
       for (const comment of page) {
         if (observed >= MAX_PULL_REQUEST_COMMENTS) {
           throw new PullRequestCommentLimitError(
@@ -45,20 +46,19 @@ export async function listBoundedPullRequestComments(): Promise<
         }
         observed += 1
 
-        if (
-          comment.body !== undefined &&
-          comment.body !== null &&
-          typeof comment.body !== 'string'
-        ) {
+        if (!comment || typeof comment !== 'object') {
+          throw new PullRequestCommentLimitError(
+            'GitHub returned an invalid Pull Request comment. The action will fail closed.'
+          )
+        }
+        if (typeof comment.body !== 'string') {
           throw new PullRequestCommentLimitError(
             'GitHub returned an invalid Pull Request comment body. The action will fail closed.'
           )
         }
-        const bodyBytes = Buffer.byteLength(comment.body ?? '', 'utf8')
+        const bodyBytes = Buffer.byteLength(comment.body, 'utf8')
         if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BODY_BYTES) {
-          throw new PullRequestCommentLimitError(
-            `A Pull Request comment body exceeds ${MAX_PULL_REQUEST_COMMENT_BODY_BYTES} bytes. The action will fail closed.`
-          )
+          continue
         }
         if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BYTES - observedBodyBytes) {
           throw new PullRequestCommentLimitError(
@@ -66,8 +66,9 @@ export async function listBoundedPullRequestComments(): Promise<
           )
         }
         observedBodyBytes += bodyBytes
+        boundedPage.push(comment)
       }
-      return page
+      return boundedPage
     }
   )
 }

@@ -48700,26 +48700,29 @@ async function listBoundedPullRequestComments() {
         if (!Array.isArray(page)) {
             throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment page. The action will fail closed.');
         }
+        const boundedPage = [];
         for (const comment of page) {
             if (observed >= MAX_PULL_REQUEST_COMMENTS) {
                 throw new PullRequestCommentLimitError(`A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`);
             }
             observed += 1;
-            if (comment.body !== undefined &&
-                comment.body !== null &&
-                typeof comment.body !== 'string') {
+            if (!comment || typeof comment !== 'object') {
+                throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment. The action will fail closed.');
+            }
+            if (typeof comment.body !== 'string') {
                 throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment body. The action will fail closed.');
             }
-            const bodyBytes = Buffer.byteLength(comment.body ?? '', 'utf8');
+            const bodyBytes = Buffer.byteLength(comment.body, 'utf8');
             if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BODY_BYTES) {
-                throw new PullRequestCommentLimitError(`A Pull Request comment body exceeds ${MAX_PULL_REQUEST_COMMENT_BODY_BYTES} bytes. The action will fail closed.`);
+                continue;
             }
             if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BYTES - observedBodyBytes) {
                 throw new PullRequestCommentLimitError(`The combined Pull Request comment bodies exceed ${MAX_PULL_REQUEST_COMMENT_BYTES} bytes. The action will fail closed.`);
             }
             observedBodyBytes += bodyBytes;
+            boundedPage.push(comment);
         }
-        return page;
+        return boundedPage;
     });
 }
 

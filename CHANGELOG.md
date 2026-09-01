@@ -80,9 +80,10 @@ commit that introduced it.
   of reporting success with an unlocked signature comment.
 - Pull Requests with more than 1,000 comments and signature ledgers with more
   than 10,000 entries or 1,000,000 bytes fail closed before a read or write.
-- Pull Request comment bodies are bounded to 65,536 UTF-8 bytes each and
-  10,000,000 combined bytes per bounded history. Malformed comment bodies fail
-  closed before a read or write.
+- Pull Request comment bodies over 65,536 UTF-8 bytes are discarded as
+  non-matching comments. Retained bodies are bounded to 10,000,000 combined
+  UTF-8 bytes per bounded history. Malformed comment data fails closed before
+  a ledger or Pull Request comment operation.
 - A closed event is re-fetched and matched by immutable base repository ID,
   base branch, opener, state, and merge result before the action locks the
   conversation. A valid live head is still required, but a source branch

@@ -4,6 +4,7 @@ import { reloadOctokit, setContext } from '../testHelpers/context'
 
 const MAX_COMMENT_BODY_BYTES = 65_536
 const MAX_COMMENT_BYTES = 10_000_000
+const SIGN_PHRASE = 'I have read the CLA Document and I hereby sign the CLA'
 
 async function listComments(): Promise<
   Awaited<
@@ -43,10 +44,14 @@ describe('bounded Pull Request comment payloads', () => {
     resetEnv()
   })
 
-  it('fails closed before writes when one comment body exceeds the byte limit', async () => {
+  it('skips an oversized irrelevant body and keeps a valid later comment', async () => {
     const repository = fake.repo('acme', 'widgets')
     repository.addComment(7, {
       body: 'x'.repeat(MAX_COMMENT_BODY_BYTES + 1),
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    const validComment = repository.addComment(7, {
+      body: SIGN_PHRASE,
       user: { login: 'alice', id: 1001, type: 'User' }
     })
     setContext({
@@ -56,14 +61,30 @@ describe('bounded Pull Request comment payloads', () => {
       payload: { repository: { id: repository.state.id } }
     })
 
-    await expect(listComments()).rejects.toThrow(
-      /comment body exceeds 65536 bytes/i
-    )
+    const comments = await listComments()
 
+    expect(comments.map(comment => comment.id)).toEqual([validComment.id])
     expect(writeRequests(fake)).toEqual([])
   })
 
-  it('fails closed before writes when comment bodies exceed the aggregate byte limit', async () => {
+  it('skips an oversized body that only prefixes the exact signing phrase', async () => {
+    const repository = fake.repo('acme', 'widgets')
+    repository.addComment(7, {
+      body: `${SIGN_PHRASE}${'x'.repeat(MAX_COMMENT_BODY_BYTES)}`,
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 7,
+      payload: { repository: { id: repository.state.id } }
+    })
+
+    await expect(listComments()).resolves.toEqual([])
+    expect(writeRequests(fake)).toEqual([])
+  })
+
+  it('fails closed before writes when retained comment bodies exceed the aggregate byte limit', async () => {
     const repository = fake.repo('acme', 'widgets')
     const body = 'x'.repeat(65_000)
     const commentCount = Math.floor(MAX_COMMENT_BYTES / body.length) + 1
@@ -107,22 +128,25 @@ describe('bounded Pull Request comment payloads', () => {
     await expect(listBoundedPullRequestComments()).resolves.toHaveLength(1)
   })
 
-  it('fails closed on a malformed comment body instead of coercing it', async () => {
-    const repository = fake.repo('acme', 'widgets')
-    const comment = repository.addComment(7, {
-      body: 'ordinary comment',
-      user: { login: 'alice', id: 1001, type: 'User' }
-    })
-    comment.body = 42 as unknown as string
-    setContext({
-      owner: 'acme',
-      repo: 'widgets',
-      issueNumber: 7,
-      payload: { repository: { id: repository.state.id } }
-    })
+  it.each([42, null, undefined])(
+    'fails closed on a malformed comment body (%s) instead of coercing it',
+    async malformedBody => {
+      const repository = fake.repo('acme', 'widgets')
+      const comment = repository.addComment(7, {
+        body: 'ordinary comment',
+        user: { login: 'alice', id: 1001, type: 'User' }
+      })
+      comment.body = malformedBody as unknown as string
+      setContext({
+        owner: 'acme',
+        repo: 'widgets',
+        issueNumber: 7,
+        payload: { repository: { id: repository.state.id } }
+      })
 
-    await expect(listComments()).rejects.toThrow(/invalid .*comment body/i)
+      await expect(listComments()).rejects.toThrow(/invalid .*comment body/i)
 
-    expect(writeRequests(fake)).toEqual([])
-  })
+      expect(writeRequests(fake)).toEqual([])
+    }
+  )
 })
