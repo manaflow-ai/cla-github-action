@@ -54,6 +54,9 @@ export async function setupClaCheck() {
   // A caller may use this output to authorize a follow-up check refresh. Keep
   // it false unless this run actually persists a newly accepted signature.
   core.setOutput('signature_recorded', false)
+  // This is a final policy result, not a record of one signature. Keep it
+  // false until the all-signed status has been applied successfully.
+  core.setOutput('cla_passed', false)
   const expectedSigningComment = getExpectedSigningComment()
   const livePullRequest = await validateLivePullRequest()
   // Bound all contributor-controlled comments before any ledger or comment
@@ -140,11 +143,12 @@ export async function setupClaCheck() {
       // revalidated and persisted. A rejected comment leaves the last trusted
       // bot status unchanged.
       await commentPlan.apply()
-      core.info(`All contributors have signed the CLA 📝 ✅ `)
       if (openerMismatch?.hardFail) {
         core.setFailed(openerMismatchError(openerMismatch))
         return
       }
+      core.setOutput('cla_passed', true)
+      core.info(`All contributors have signed the CLA 📝 ✅ `)
       return
     } else {
       await commentPlan.apply()
@@ -313,9 +317,15 @@ async function createClaFileAndPRComment(
     undefined,
     () => validateExpectedSigningCommentLive(expectedSigningComment)
   )
-  if (committers.length === 0) return
   if (committerMap.openerMismatch?.hardFail) {
     throw new Error(openerMismatchError(committerMap.openerMismatch))
+  }
+  if (committers.length === 0) {
+    // Bootstrap has already created the empty ledger and applied the
+    // all-signed comment for an authenticated, allowlisted opener. Report a
+    // pass only after that final comment write succeeded.
+    core.setOutput('cla_passed', true)
+    return
   }
   throw new Error(
     `Committers of pull request ${context.issue.number} have to sign the CLA`

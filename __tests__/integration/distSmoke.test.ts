@@ -197,6 +197,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
     expect(result.stdout).toMatch(
       /::error::.*Committers of Pull Request number 7/
     )
+    expect(result.stdout).toMatch(/::set-output name=cla_passed::false/)
     expect(result.code).toBe(1)
 
     const comments = fake.repo('acme', 'widgets').listComments(7)
@@ -244,6 +245,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
     })
 
     expect(result.code).toBe(0)
+    expect(result.stdout).toMatch(/::set-output name=cla_passed::true/)
 
     const sigFile = fake
       .repo('acme', 'widgets')
@@ -298,6 +300,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
     expect(result.code).toBe(0)
     expect(result.stdout).toMatch(/signer_authorized::true/)
     expect(result.stdout).toMatch(/signer_decision::authorized/)
+    expect(result.stdout).toMatch(/cla_passed::false/)
     expect(result.stdout).toMatch(/head_sha::headsha/)
     expect(result.stdout).toMatch(/base_sha::base-sha/)
     expect(result.stdout).toMatch(/comment_id::1/)

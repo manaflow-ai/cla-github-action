@@ -12,6 +12,7 @@ export async function run() {
   try {
     core.info(`CLA Assistant GitHub Action bot has started the process`)
     core.setOutput('signature_recorded', false)
+    core.setOutput('cla_passed', false)
     core.setOutput('signer_authorized', false)
     setSignerDecision('error')
     core.setOutput('head_sha', '')

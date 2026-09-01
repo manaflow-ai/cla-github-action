@@ -19,6 +19,7 @@ async function runAction() {
 function watchCore() {
   const failed = jest.spyOn(core, 'setFailed').mockImplementation(() => {})
   const warned = jest.spyOn(core, 'warning').mockImplementation(() => {})
+  const output = jest.spyOn(core, 'setOutput').mockImplementation(() => {})
   return {
     get failures() {
       return failed.mock.calls.map(c => String(c[0]))
@@ -26,9 +27,13 @@ function watchCore() {
     get warnings() {
       return warned.mock.calls.map(c => String(c[0]))
     },
+    get outputs() {
+      return output.mock.calls.map(c => [c[0], c[1]])
+    },
     restore() {
       failed.mockRestore()
       warned.mockRestore()
+      output.mockRestore()
     }
   }
 }
@@ -84,6 +89,7 @@ describe('error paths', () => {
     expect(watch.failures.join('\n')).toMatch(
       /Could not retrieve repository contents/
     )
+    expect(watch.outputs).toContainEqual(['cla_passed', false])
     expect(fake.repo('acme', 'widgets').listComments(7)).toHaveLength(0)
     watch.restore()
   })
@@ -164,6 +170,60 @@ describe('error paths', () => {
     expect(watch.failures.join('\n')).toMatch(
       /creating the signed contributors file.*branch.*protected/i
     )
+    expect(watch.outputs).toContainEqual(['cla_passed', false])
+    watch.restore()
+  })
+
+  it('keeps cla_passed false when the final all-signed comment cannot be applied', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    repository.addPullRequest({
+      number: 7,
+      head: { sha: 'headsha', ref: 'feature/cla' },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    repository.setFile('signatures/v1/cla.json', {
+      signedContributors: []
+    })
+    repository.addComment(7, {
+      body: '**CLA Assistant Lite bot**: please sign',
+      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
+    })
+    repository.addComment(7, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'alice', id: 1001, type: 'User' }
+    })
+    fake.injectFailure({
+      method: 'PATCH',
+      pathPattern: /\/repos\/acme\/widgets\/issues\/comments\/\d+$/,
+      status: 503,
+      times: 1000
+    })
+
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 7,
+      actor: 'alice',
+      eventName: 'issue_comment',
+      payload: {
+        action: 'created',
+        issue: { number: 7, pull_request: {} },
+        comment: {
+          body: 'I have read the CLA Document and I hereby sign the CLA',
+          user: { login: 'alice', id: 1001, type: 'User' }
+        },
+        repository: { id: repository.state.id, full_name: 'acme/widgets' }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(
+      /Could not complete the CLA check/
+    )
+    expect(watch.outputs).toContainEqual(['signature_recorded', true])
+    expect(watch.outputs).toContainEqual(['cla_passed', false])
     watch.restore()
   })
 

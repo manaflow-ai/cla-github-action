@@ -75,6 +75,7 @@ describe('Pull request event', () => {
     await run()
     expect(mockedValidateMergedPullRequestForLock).toHaveBeenCalled()
     expect(mockedLockPullRequest).toHaveBeenCalled()
+    expect(core.setOutput).toHaveBeenCalledWith('cla_passed', false)
   })
 
   test('a failed lock request is reported through the action failure channel', async () => {

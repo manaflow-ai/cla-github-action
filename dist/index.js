@@ -49666,6 +49666,9 @@ async function setupClaCheck() {
     // A caller may use this output to authorize a follow-up check refresh. Keep
     // it false unless this run actually persists a newly accepted signature.
     setOutput('signature_recorded', false);
+    // This is a final policy result, not a record of one signature. Keep it
+    // false until the all-signed status has been applied successfully.
+    setOutput('cla_passed', false);
     const expectedSigningComment = getExpectedSigningComment();
     const livePullRequest = await validateLivePullRequest();
     // Bound all contributor-controlled comments before any ledger or comment
@@ -49718,11 +49721,12 @@ async function setupClaCheck() {
             // revalidated and persisted. A rejected comment leaves the last trusted
             // bot status unchanged.
             await commentPlan.apply();
-            info(`All contributors have signed the CLA 📝 ✅ `);
             if (openerMismatch?.hardFail) {
                 setFailed(openerMismatchError(openerMismatch));
                 return;
             }
+            setOutput('cla_passed', true);
+            info(`All contributors have signed the CLA 📝 ✅ `);
             return;
         }
         else {
@@ -49840,10 +49844,15 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
     // until a later run can validate and persist them through the normal update
     // path. Never publish all-signed status for an empty new ledger.
     await prCommentSetup(committerMap, committers, pullRequestComments, false, undefined, () => validateExpectedSigningCommentLive(expectedSigningComment));
-    if (committers.length === 0)
-        return;
     if (committerMap.openerMismatch?.hardFail) {
         throw new Error(openerMismatchError(committerMap.openerMismatch));
+    }
+    if (committers.length === 0) {
+        // Bootstrap has already created the empty ledger and applied the
+        // all-signed comment for an authenticated, allowlisted opener. Report a
+        // pass only after that final comment write succeeded.
+        setOutput('cla_passed', true);
+        return;
     }
     throw new Error(`Committers of pull request ${github_context.issue.number} have to sign the CLA`);
 }
@@ -49974,6 +49983,9 @@ function setSignerDecision(decision) {
  * signal for a least-privilege workflow gate.
  */
 async function runSignerPreflight() {
+    // Preflight is an admission check only. It never establishes a final CLA
+    // result, even when the signer identity is authorized.
+    setOutput('cla_passed', false);
     setOutput('signer_authorized', false);
     const livePullRequest = await validateLivePullRequest();
     setOutput('head_sha', livePullRequest.headSha);
@@ -50113,6 +50125,7 @@ async function run() {
     try {
         info(`CLA Assistant GitHub Action bot has started the process`);
         setOutput('signature_recorded', false);
+        setOutput('cla_passed', false);
         setOutput('signer_authorized', false);
         setSignerDecision('error');
         setOutput('head_sha', '');
