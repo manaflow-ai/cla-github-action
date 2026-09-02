@@ -330,10 +330,10 @@ describe('bug fixes', () => {
       watch.restore()
     })
 
-    it('passes when the first Pull Request opener is allowlisted', async () => {
+    it('passes when the first Pull Request opener has an explicit legal exemption', async () => {
       const watch = watchCore()
       const repository = fake.repo('acme', 'widgets')
-      setInput('allowlist-ids', '49699333')
+      setInput('exempt-opener-ids', '49699333')
       repository.addPullRequest({
         number: 10,
         head: { sha: 'headsha', ref: 'deps/bootstrap' },

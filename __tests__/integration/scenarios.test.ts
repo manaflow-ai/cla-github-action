@@ -390,8 +390,8 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('Dependabot PR: numeric-ID allow-listed, skipped entirely, check passes', async () => {
-    setInput('allowlist-ids', '49699333')
+  it('Dependabot PR: authenticated opener legal exemption skips the ledger requirement', async () => {
+    setInput('exempt-opener-ids', '49699333')
     fake.repo('acme', 'widgets').addPullRequest({
       number: 9,
       head: { sha: 'headsha', ref: 'deps/bump' },
@@ -416,11 +416,48 @@ describe('CLA action end-to-end scenarios', () => {
 
     await runAction()
 
-    // No signatures recorded (allowlist short-circuits).
+    // No signatures are recorded because the explicitly exempt live opener is
+    // not a required legal signer.
     const sigFile = fake
       .repo('acme', 'widgets')
       .getFile('signatures/cla.json') as any
     expect(sigFile.signedContributors).toEqual([])
+  })
+
+  it('opener-authorship allowlist does not skip the legal signature requirement', async () => {
+    const watch = watchCore()
+    setInput('allowlist-ids', '49699333')
+    fake.repo('acme', 'widgets').addPullRequest({
+      number: 10,
+      head: { sha: 'headsha', ref: 'deps/allowlist-only' },
+      user: { login: 'dependabot[bot]', id: 49699333 },
+      commits: [{ author: { login: 'dependabot[bot]', id: 49699333 } }]
+    })
+    fake
+      .repo('acme', 'widgets')
+      .setFile('signatures/cla.json', { signedContributors: [] })
+
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 10,
+      actor: 'dependabot[bot]',
+      eventName: 'pull_request_target',
+      payload: {
+        pull_request: { number: 10, state: 'open' },
+        repository: { id: fake.repo('acme', 'widgets').state.id },
+        action: 'opened'
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/have to sign the CLA/i)
+    expect(
+      (fake.repo('acme', 'widgets').getFile('signatures/cla.json') as any)
+        .signedContributors
+    ).toEqual([])
+    watch.restore()
   })
 
   it('does not exempt an allowlisted ID unless it is the authenticated live opener', async () => {
@@ -479,7 +516,7 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('does not fail an authenticated allowlisted opener mismatch in writer mode', async () => {
+  it('allows an authenticated allowlisted opener mismatch when the opener has signed', async () => {
     const watch = watchCore()
     const repository = fake.repo('acme', 'widgets')
     setInput('allowlist-ids', '38676809')
@@ -490,7 +527,10 @@ describe('CLA action end-to-end scenarios', () => {
       commits: [{ author: { login: 'bob', id: 2002 } }]
     })
     repository.setFile('signatures/cla.json', {
-      signedContributors: [{ name: 'bob', id: 2002 }]
+      signedContributors: [
+        { name: 'bob', id: 2002 },
+        { name: 'austin', id: 38676809 }
+      ]
     })
     repository.addComment(29, {
       body: 'I have read the CLA Document and I hereby sign the CLA',
@@ -514,13 +554,53 @@ describe('CLA action end-to-end scenarios', () => {
     expect(watch.failures).toEqual([])
     expect(watch.outputs).toContainEqual(['opener_not_in_commits', true])
     expect(repository.getFile('signatures/cla.json')).toEqual({
-      signedContributors: [{ name: 'bob', id: 2002 }]
+      signedContributors: [
+        { name: 'bob', id: 2002 },
+        { name: 'austin', id: 38676809 }
+      ]
     })
     expect(
       repository
         .listComments(29)
         .find(comment => comment.user.login === 'github-actions[bot]')?.body
     ).toMatch(/all contributors have signed the cla/i)
+    watch.restore()
+  })
+
+  it('skips only an authenticated exempt opener from the legal signer set', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    setInput('allowlist-ids', '38676809')
+    setInput('exempt-opener-ids', '38676809')
+    repository.addPullRequest({
+      number: 30,
+      head: { sha: 'headsha', ref: 'feature/exempt-opener' },
+      user: { login: 'austin', id: 38676809 },
+      commits: [{ author: { login: 'bob', id: 2002 } }]
+    })
+    repository.setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'bob', id: 2002 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 30,
+      actor: 'austin',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: { number: 30, state: 'open' },
+        repository: { id: repository.state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures).toEqual([])
+    expect(watch.outputs).toContainEqual(['cla_passed', true])
+    expect(repository.getFile('signatures/cla.json')).toEqual({
+      signedContributors: [{ name: 'bob', id: 2002 }]
+    })
     watch.restore()
   })
 
