@@ -6,13 +6,14 @@ import * as input from './shared/getInputs'
  * Exempt only the identity authenticated by the live Pull Request API as the
  * opener, and only when its database ID is explicitly configured. GitHub may
  * map forgeable commit emails to account IDs, so a commit-derived ID alone is
- * never enough for an exemption.
+ * never enough for an exemption. The authenticated opener exemption covers
+ * both the legal signature ledger and the opener-authorship guard.
  */
 export function checkAllowList(committers: Committer[]): Committer[] {
   const legacy = input.getAllowListItem().trim()
   if (legacy) {
     core.warning(
-      "The deprecated 'allowlist' input is ignored because names, emails, and globs can be spoofed in commit metadata. Use 'allowlist-ids' only for authenticated Pull Request opener IDs."
+      "The deprecated 'allowlist' input is ignored because names, emails, and globs can be spoofed in commit metadata. Use 'allowlist-ids' only for an authenticated Pull Request opener ID."
     )
   }
 

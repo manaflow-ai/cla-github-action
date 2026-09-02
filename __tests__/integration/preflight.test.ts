@@ -142,6 +142,7 @@ describe('signer-preflight mode', () => {
     expect(watch.outputs).toContainEqual(['signer_authorized', true])
     expect(watch.outputs).toContainEqual(['signer_decision', 'authorized'])
     expect(watch.outputs).toContainEqual(['cla_passed', false])
+    expect(watch.outputs).toContainEqual(['api_result', 'success'])
     expect(watch.outputs).toContainEqual(['head_sha', 'headsha'])
     expect(watch.outputs).toContainEqual(['base_sha', 'base-sha'])
     expect(watch.outputs).toContainEqual(['comment_id', String(comment.id)])

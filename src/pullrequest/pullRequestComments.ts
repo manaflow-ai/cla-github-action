@@ -5,6 +5,7 @@ import {
   MAX_PULL_REQUEST_COMMENT_BYTES,
   MAX_PULL_REQUEST_COMMENTS
 } from '../shared/limits'
+import { toGitHubApiError } from '../shared/errors'
 
 export type PullRequestComment = Awaited<
   ReturnType<typeof octokit.rest.issues.listComments>
@@ -23,53 +24,58 @@ export async function listBoundedPullRequestComments(): Promise<
 > {
   let observed = 0
   let observedBodyBytes = 0
-  return octokit.paginate(
-    octokit.rest.issues.listComments,
-    {
-      owner: context.repo.owner,
-      repo: context.repo.repo,
-      issue_number: context.issue.number,
-      per_page: 100
-    },
-    response => {
-      const page = response.data
-      if (!Array.isArray(page)) {
-        throw new PullRequestCommentLimitError(
-          'GitHub returned an invalid Pull Request comment page. The action will fail closed.'
-        )
-      }
-      const boundedPage: PullRequestComment[] = []
-      for (const comment of page) {
-        if (observed >= MAX_PULL_REQUEST_COMMENTS) {
+  try {
+    return await octokit.paginate(
+      octokit.rest.issues.listComments,
+      {
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: context.issue.number,
+        per_page: 100
+      },
+      response => {
+        const page = response.data
+        if (!Array.isArray(page)) {
           throw new PullRequestCommentLimitError(
-            `A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`
+            'GitHub returned an invalid Pull Request comment page. The action will fail closed.'
           )
         }
-        observed += 1
+        const boundedPage: PullRequestComment[] = []
+        for (const comment of page) {
+          if (observed >= MAX_PULL_REQUEST_COMMENTS) {
+            throw new PullRequestCommentLimitError(
+              `A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`
+            )
+          }
+          observed += 1
 
-        if (!comment || typeof comment !== 'object') {
-          throw new PullRequestCommentLimitError(
-            'GitHub returned an invalid Pull Request comment. The action will fail closed.'
-          )
+          if (!comment || typeof comment !== 'object') {
+            throw new PullRequestCommentLimitError(
+              'GitHub returned an invalid Pull Request comment. The action will fail closed.'
+            )
+          }
+          if (typeof comment.body !== 'string') {
+            throw new PullRequestCommentLimitError(
+              'GitHub returned an invalid Pull Request comment body. The action will fail closed.'
+            )
+          }
+          const bodyBytes = Buffer.byteLength(comment.body, 'utf8')
+          if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BYTES - observedBodyBytes) {
+            throw new PullRequestCommentLimitError(
+              `The combined Pull Request comment bodies exceed ${MAX_PULL_REQUEST_COMMENT_BYTES} bytes. The action will fail closed.`
+            )
+          }
+          observedBodyBytes += bodyBytes
+          if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BODY_BYTES) {
+            continue
+          }
+          boundedPage.push(comment)
         }
-        if (typeof comment.body !== 'string') {
-          throw new PullRequestCommentLimitError(
-            'GitHub returned an invalid Pull Request comment body. The action will fail closed.'
-          )
-        }
-        const bodyBytes = Buffer.byteLength(comment.body, 'utf8')
-        if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BYTES - observedBodyBytes) {
-          throw new PullRequestCommentLimitError(
-            `The combined Pull Request comment bodies exceed ${MAX_PULL_REQUEST_COMMENT_BYTES} bytes. The action will fail closed.`
-          )
-        }
-        observedBodyBytes += bodyBytes
-        if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BODY_BYTES) {
-          continue
-        }
-        boundedPage.push(comment)
+        return boundedPage
       }
-      return boundedPage
-    }
-  )
+    )
+  } catch (error) {
+    if (error instanceof PullRequestCommentLimitError) throw error
+    throw toGitHubApiError(error, 'issues.listComments')
+  }
 }

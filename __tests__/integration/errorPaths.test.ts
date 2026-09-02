@@ -90,6 +90,7 @@ describe('error paths', () => {
       /Could not retrieve repository contents/
     )
     expect(watch.outputs).toContainEqual(['cla_passed', false])
+    expect(watch.outputs).toContainEqual(['api_result', 'retryable_error'])
     expect(fake.repo('acme', 'widgets').listComments(7)).toHaveLength(0)
     watch.restore()
   })
@@ -131,6 +132,7 @@ describe('error paths', () => {
     expect(watch.failures.join('\n')).toMatch(
       /Could not retrieve repository contents|Could not complete the CLA check/
     )
+    expect(watch.outputs).toContainEqual(['api_result', 'retryable_error'])
     watch.restore()
   })
 
@@ -171,6 +173,7 @@ describe('error paths', () => {
       /creating the signed contributors file.*branch.*protected/i
     )
     expect(watch.outputs).toContainEqual(['cla_passed', false])
+    expect(watch.outputs).toContainEqual(['api_result', 'error'])
     watch.restore()
   })
 
@@ -224,6 +227,64 @@ describe('error paths', () => {
     )
     expect(watch.outputs).toContainEqual(['signature_recorded', true])
     expect(watch.outputs).toContainEqual(['cla_passed', false])
+    expect(watch.outputs).toContainEqual(['api_result', 'retryable_error'])
+    watch.restore()
+  })
+
+  it('classifies an external-fork signing transport failure as retryable and writes nothing', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    repository.addPullRequest({
+      number: 8,
+      head: {
+        sha: 'headsha',
+        ref: 'feature/external-fork',
+        repoFullName: 'contributor/widgets-fork',
+        repoId: 2002
+      },
+      user: { login: 'contributor', id: 3003 },
+      commits: [{ author: { login: 'contributor', id: 3003 } }]
+    })
+    repository.setFile('signatures/v1/cla.json', {
+      signedContributors: []
+    })
+    repository.addComment(8, {
+      body: 'I have read the CLA Document and I hereby sign the CLA',
+      user: { login: 'contributor', id: 3003, type: 'User' }
+    })
+    fake.injectFailure({
+      method: 'POST',
+      pathPattern: /\/graphql$/,
+      status: 503,
+      times: 1
+    })
+
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 8,
+      actor: 'contributor',
+      eventName: 'issue_comment',
+      payload: {
+        action: 'created',
+        issue: { number: 8, pull_request: {} },
+        comment: {
+          body: 'I have read the CLA Document and I hereby sign the CLA',
+          user: { login: 'contributor', id: 3003, type: 'User' }
+        },
+        repository: { id: repository.state.id, full_name: 'acme/widgets' }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.outputs).toContainEqual(['signature_recorded', false])
+    expect(watch.outputs).toContainEqual(['cla_passed', false])
+    expect(watch.outputs).toContainEqual(['api_result', 'retryable_error'])
+    expect(repository.getFile('signatures/v1/cla.json')).toEqual({
+      signedContributors: []
+    })
+    expect(repository.listComments(8)).toHaveLength(1)
     watch.restore()
   })
 

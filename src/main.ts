@@ -7,12 +7,15 @@ import * as input from './shared/getInputs'
 import { validateMergedPullRequestForLock } from './livePullRequest'
 import { requireHttpsDocumentUrl } from './shared/documentUrl'
 import { runSignerPreflight, setSignerDecision } from './signerPreflight'
+import { apiResultForError, errorMessage } from './shared/errors'
+import { setApiResult } from './shared/apiResult'
 
 export async function run() {
   try {
     core.info(`CLA Assistant GitHub Action bot has started the process`)
     core.setOutput('signature_recorded', false)
     core.setOutput('cla_passed', false)
+    setApiResult('error')
     core.setOutput('signer_authorized', false)
     setSignerDecision('error')
     core.setOutput('head_sha', '')
@@ -41,12 +44,14 @@ export async function run() {
       ) {
         await validateMergedPullRequestForLock()
         await lockPullRequest()
+        setApiResult('success')
         return
       }
       const reason = context.payload.pull_request?.merged
         ? 'automatic locking is disabled'
         : 'it was not merged'
       core.info(`Pull request ${context.issue.number} is closed and ${reason}`)
+      setApiResult('success')
       return
     }
 
@@ -61,7 +66,8 @@ export async function run() {
 
     await setupClaCheck()
   } catch (error) {
-    if (error instanceof Error) core.setFailed(error.message)
+    setApiResult(apiResultForError(error))
+    core.setFailed(errorMessage(error))
   }
 }
 

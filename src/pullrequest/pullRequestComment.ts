@@ -4,7 +4,7 @@ import signatureWithPRComment from './signatureComment'
 import { commentContent } from './pullRequestCommentContent'
 import { CommitterMap, Committer, ReactedCommitterMap } from '../interfaces'
 import { getUseDcoFlag } from '../shared/getInputs'
-import { errorMessage } from '../shared/errors'
+import { errorMessage, withGitHubApiError } from '../shared/errors'
 import * as core from '@actions/core'
 import {
   listBoundedPullRequestComments,
@@ -165,7 +165,8 @@ async function applyCommentOperation(
 
 function commentOperationError(error: unknown): Error {
   return new Error(
-    `Error occured when creating or editing the comments of the pull request: ${errorMessage(error)}`
+    `Error occured when creating or editing the comments of the pull request: ${errorMessage(error)}`,
+    { cause: error }
   )
 }
 
@@ -236,18 +237,21 @@ async function createComment(
   signed: boolean,
   committerMap: CommitterMap
 ): Promise<void> {
-  await octokit.rest.issues
-    .createComment({
-      owner: context.repo.owner,
-      repo: context.repo.repo,
-      issue_number: context.issue.number,
-      body: commentContent(signed, committerMap)
-    })
-    .catch(error => {
-      throw new Error(
-        `Error occured when creating a pull request comment: ${errorMessage(error)}`
-      )
-    })
+  try {
+    await withGitHubApiError('issues.createComment', () =>
+      octokit.rest.issues.createComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        issue_number: context.issue.number,
+        body: commentContent(signed, committerMap)
+      })
+    )
+  } catch (error) {
+    throw new Error(
+      `Error occured when creating a pull request comment: ${errorMessage(error)}`,
+      { cause: error }
+    )
+  }
 }
 
 async function updateComment(
@@ -256,16 +260,19 @@ async function updateComment(
   claBotComment: any
 ): Promise<unknown> {
   try {
-    const response = await octokit.rest.issues.updateComment({
-      owner: context.repo.owner,
-      repo: context.repo.repo,
-      comment_id: claBotComment.id,
-      body: commentContent(signed, committerMap)
-    })
+    const response = await withGitHubApiError('issues.updateComment', () =>
+      octokit.rest.issues.updateComment({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        comment_id: claBotComment.id,
+        body: commentContent(signed, committerMap)
+      })
+    )
     return response.data
   } catch (error) {
     throw new Error(
-      `Error occured when updating the pull request comment: ${errorMessage(error)}`
+      `Error occured when updating the pull request comment: ${errorMessage(error)}`,
+      { cause: error }
     )
   }
 }
@@ -286,9 +293,11 @@ async function getComment(
     // GitHub's canonical Actions bot account and accept only a marker written
     // by that API identity. This avoids a hard-coded database ID while still
     // failing closed if GitHub cannot verify the bot account.
-    const canonicalBot = await octokit.rest.users.getByUsername({
-      username: ACTIONS_BOT_LOGIN
-    })
+    const canonicalBot = await withGitHubApiError('users.getByUsername', () =>
+      octokit.rest.users.getByUsername({
+        username: ACTIONS_BOT_LOGIN
+      })
+    )
     if (
       canonicalBot.data.type !== 'Bot' ||
       canonicalBot.data.login.toLowerCase() !== ACTIONS_BOT_LOGIN ||
@@ -315,7 +324,9 @@ async function getComment(
     return trusted
   } catch (error) {
     if (error instanceof PullRequestCommentLimitError) throw error
-    throw new Error('Could not retrieve or verify CLA bot comments')
+    throw new Error('Could not retrieve or verify CLA bot comments', {
+      cause: error
+    })
   }
 }
 

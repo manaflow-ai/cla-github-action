@@ -20,7 +20,8 @@ import {
 import prCommentSetup, {
   preparePrComment
 } from './pullrequest/pullRequestComment'
-import { errorMessage, errorStatus } from './shared/errors'
+import { apiResultForError, errorMessage, errorStatus } from './shared/errors'
+import { setApiResult } from './shared/apiResult'
 import {
   getExpectedSigningComment,
   requireOpenerAsAuthor
@@ -51,6 +52,7 @@ import {
 } from './pullrequest/signingCommentSnapshot'
 
 export async function setupClaCheck() {
+  setApiResult('error')
   // A caller may use this output to authorize a follow-up check refresh. Keep
   // it false unless this run actually persists a newly accepted signature.
   core.setOutput('signature_recorded', false)
@@ -83,13 +85,19 @@ export async function setupClaCheck() {
     committerMap.openerMismatch = openerMismatch
   }
 
-  const claFile = await getCLAFileContentandSHA(
-    committers,
-    committerMap,
-    livePullRequest,
-    pullRequestComments,
-    expectedSigningComment
-  )
+  let claFile: ClafileContentAndSha | void
+  try {
+    claFile = await getCLAFileContentandSHA(
+      committers,
+      committerMap,
+      livePullRequest,
+      pullRequestComments,
+      expectedSigningComment
+    )
+  } catch (err) {
+    failSetup(err)
+    return
+  }
   // A missing ledger was created and no contributor remains after the
   // authenticated opener allowlist. The bootstrap path already published the
   // all-signed status, so no ledger update is required.
@@ -144,21 +152,33 @@ export async function setupClaCheck() {
       // bot status unchanged.
       await commentPlan.apply()
       if (openerMismatch?.hardFail) {
+        setApiResult('error')
         core.setFailed(openerMismatchError(openerMismatch))
         return
       }
+      setApiResult('success')
       core.setOutput('cla_passed', true)
       core.info(`All contributors have signed the CLA 📝 ✅ `)
       return
     } else {
       await commentPlan.apply()
+      setApiResult('unsigned')
       core.setFailed(
         `Committers of Pull Request number ${context.issue.number} have to sign the CLA 📝`
       )
     }
   } catch (err) {
-    core.setFailed(`Could not complete the CLA check: ${errorMessage(err)}`)
+    failSetup(err)
   }
+}
+
+class UnsignedClaError extends Error {}
+
+function failSetup(error: unknown): void {
+  setApiResult(
+    error instanceof UnsignedClaError ? 'unsigned' : apiResultForError(error)
+  )
+  core.setFailed(`Could not complete the CLA check: ${errorMessage(error)}`)
 }
 
 async function getCLAFileContentandSHA(
@@ -182,7 +202,8 @@ async function getCLAFileContentandSHA(
       )
     } else {
       throw new Error(
-        `Could not retrieve repository contents. Status: ${errorStatus(error) ?? 'unknown'}`
+        `Could not retrieve repository contents. Status: ${errorStatus(error) ?? 'unknown'}`,
+        { cause: error }
       )
     }
   }
@@ -301,7 +322,8 @@ async function createClaFileAndPRComment(
       return recoveredLedger
     }
     throw new Error(
-      `Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`
+      `Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`,
+      { cause: error }
     )
   }
   await validateLivePullRequest(livePullRequest)
@@ -325,9 +347,10 @@ async function createClaFileAndPRComment(
     // all-signed comment for an authenticated, allowlisted opener. Report a
     // pass only after that final comment write succeeded.
     core.setOutput('cla_passed', true)
+    setApiResult('success')
     return
   }
-  throw new Error(
+  throw new UnsignedClaError(
     `Committers of pull request ${context.issue.number} have to sign the CLA`
   )
 }
@@ -349,7 +372,8 @@ async function recoverConcurrentLedgerCreate(
     } catch (readError) {
       if (errorStatus(readError) === 404) continue
       throw new Error(
-        `Could not verify the CLA signature ledger after a concurrent create. Status: ${errorStatus(readError) ?? 'unknown'}`
+        `Could not verify the CLA signature ledger after a concurrent create. Status: ${errorStatus(readError) ?? 'unknown'}`,
+        { cause: readError }
       )
     }
     return parseClaFileResponse(result)

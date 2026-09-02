@@ -48178,12 +48178,13 @@ function parsePositiveSafeInteger(value) {
  * Exempt only the identity authenticated by the live Pull Request API as the
  * opener, and only when its database ID is explicitly configured. GitHub may
  * map forgeable commit emails to account IDs, so a commit-derived ID alone is
- * never enough for an exemption.
+ * never enough for an exemption. The authenticated opener exemption covers
+ * both the legal signature ledger and the opener-authorship guard.
  */
 function checkAllowList(committers) {
     const legacy = getAllowListItem().trim();
     if (legacy) {
-        warning("The deprecated 'allowlist' input is ignored because names, emails, and globs can be spoofed in commit metadata. Use 'allowlist-ids' only for authenticated Pull Request opener IDs.");
+        warning("The deprecated 'allowlist' input is ignored because names, emails, and globs can be spoofed in commit metadata. Use 'allowlist-ids' only for an authenticated Pull Request opener ID.");
     }
     const { ids, invalid } = parseAllowListIds(getAllowListIds());
     if (invalid.length > 0) {
@@ -48281,19 +48282,265 @@ function _resetOctokitClientsForTests() {
 }
 
 ;// CONCATENATED MODULE: ./src/shared/errors.ts
-function errorMessage(err) {
-    if (err instanceof Error)
-        return err.message;
-    return String(err);
+const UNKNOWN_ERROR_MESSAGE = 'Unknown GitHub API error';
+const MAX_ERROR_MESSAGE_LENGTH = 512;
+// These are the network failures that the Node and Undici clients document as
+// safe to classify as transient. An unknown status-less error stays terminal.
+const RETRYABLE_TRANSPORT_CODES = new Set([
+    'ECONNABORTED',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'EAI_AGAIN',
+    'EHOSTDOWN',
+    'EHOSTUNREACH',
+    'ENETDOWN',
+    'ENETUNREACH',
+    'ENOTFOUND',
+    'EPIPE',
+    'ETIMEDOUT',
+    'ERR_NETWORK',
+    'ERR_SOCKET_TIMEOUT',
+    'UND_ERR_BODY_TIMEOUT',
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_PRX_CONN',
+    'UND_ERR_SOCKET'
+]);
+const RETRYABLE_TRANSPORT_NAMES = new Set([
+    'BodyTimeoutError',
+    'ConnectTimeoutError',
+    'FetchError',
+    'HeadersTimeoutError',
+    'NetworkError',
+    'ProxyConnectionError',
+    'SecureProxyConnectionError',
+    'SocketError'
+]);
+/**
+ * Error raised at a GitHub API boundary. The type keeps transport failures
+ * separate from HTTP responses without changing the action's fail-closed
+ * control flow. Callers must still decide whether a failed operation is safe
+ * to repeat, so the action never retries writes automatically.
+ */
+class GitHubApiError extends Error {
+    operation;
+    kind;
+    status;
+    retryable;
+    constructor(options) {
+        const status = validHttpStatus(options.status);
+        const statusText = status === undefined ? '' : ` (HTTP ${status})`;
+        super(`GitHub ${safeOperation(options.operation)} failed${statusText}: ${errorMessage(options.cause)}`, { cause: options.cause });
+        this.name = 'GitHubApiError';
+        this.operation = safeOperation(options.operation);
+        this.kind = options.kind;
+        this.status = status;
+        this.retryable = options.retryable;
+    }
 }
-/** Status code from an Octokit RequestError or a generic error; undefined otherwise. */
+const RETRYABLE_HTTP_STATUSES = new Set([
+    408, 409, 425, 429, 500, 502, 503, 504
+]);
+function errorMessage(err) {
+    const fields = readErrorFields(err);
+    const message = sanitizeDiagnostic(fields.message);
+    if (message)
+        return message;
+    const identity = [fields.name, fields.code]
+        .map(value => sanitizeToken(value))
+        .filter((value) => Boolean(value) && value !== 'Error');
+    if (identity.length > 0) {
+        return `GitHub API error (${identity.join(', ')})`;
+    }
+    return UNKNOWN_ERROR_MESSAGE;
+}
+/** Status code from an Octokit RequestError or a wrapped cause. */
 function errorStatus(err) {
-    if (err && typeof err === 'object' && 'status' in err) {
-        const s = err.status;
-        if (typeof s === 'number')
-            return s;
+    const seen = new Set();
+    let current = err;
+    while (isObjectLike(current) && !seen.has(current)) {
+        seen.add(current);
+        const status = firstValidStatus(current, ['status', 'statusCode']);
+        if (status !== undefined)
+            return status;
+        const response = readDataProperty(current, 'response');
+        const responseStatus = firstValidStatus(response, ['status', 'statusCode']);
+        if (responseStatus !== undefined)
+            return responseStatus;
+        current = readDataProperty(current, 'cause');
     }
     return undefined;
+}
+/** Convert one API-boundary failure to a typed, retry-aware error. */
+function toGitHubApiError(err, operation) {
+    if (err instanceof GitHubApiError)
+        return err;
+    const candidateStatus = errorStatus(err);
+    const status = candidateStatus !== undefined &&
+        Number.isInteger(candidateStatus) &&
+        candidateStatus >= 100 &&
+        candidateStatus <= 599
+        ? candidateStatus
+        : undefined;
+    const kind = status === undefined ? 'transport' : 'http';
+    return new GitHubApiError({
+        operation,
+        kind,
+        ...(status === undefined ? {} : { status }),
+        retryable: status === undefined
+            ? isRetryableTransportError(err)
+            : RETRYABLE_HTTP_STATUSES.has(status),
+        cause: err
+    });
+}
+/** Run one API request and preserve its failure classification for callers. */
+async function withGitHubApiError(operation, request) {
+    try {
+        return await request();
+    }
+    catch (err) {
+        throw toGitHubApiError(err, operation);
+    }
+}
+/** Map a typed API failure to the stable action output contract. */
+function apiResultForError(error) {
+    return findGitHubApiError(error)?.retryable ? 'retryable_error' : 'error';
+}
+/** Find a typed API failure through contextual Error causes. */
+function findGitHubApiError(error) {
+    const seen = new Set();
+    let current = error;
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        if (current instanceof GitHubApiError)
+            return current;
+        if (typeof current !== 'object' && typeof current !== 'function') {
+            return undefined;
+        }
+        current = current.cause;
+    }
+    return undefined;
+}
+function isRetryableTransportError(error) {
+    const seen = new Set();
+    let current = error;
+    while (isObjectLike(current) && !seen.has(current)) {
+        seen.add(current);
+        const code = readDataProperty(current, 'code');
+        if (typeof code === 'string' &&
+            RETRYABLE_TRANSPORT_CODES.has(code.toUpperCase())) {
+            return true;
+        }
+        const name = readDataProperty(current, 'name');
+        if (typeof name === 'string' && RETRYABLE_TRANSPORT_NAMES.has(name)) {
+            return true;
+        }
+        current = readDataProperty(current, 'cause');
+    }
+    return false;
+}
+function readErrorFields(error) {
+    if (typeof error === 'string')
+        return { message: error };
+    if (typeof error === 'number' ||
+        typeof error === 'boolean' ||
+        typeof error === 'bigint') {
+        return { message: String(error) };
+    }
+    const seen = new Set();
+    let current = error;
+    let name;
+    let code;
+    while (isObjectLike(current) && !seen.has(current)) {
+        seen.add(current);
+        const message = readDataProperty(current, 'message');
+        if (typeof message === 'string' && message.length > 0) {
+            const resolvedName = name ?? readStringProperty(current, 'name');
+            const resolvedCode = code ?? readStringProperty(current, 'code');
+            return {
+                message,
+                ...(resolvedName ? { name: resolvedName } : {}),
+                ...(resolvedCode ? { code: resolvedCode } : {})
+            };
+        }
+        name ??= readStringProperty(current, 'name');
+        code ??= readStringProperty(current, 'code');
+        current = readDataProperty(current, 'cause');
+    }
+    return {
+        ...(name ? { name } : {}),
+        ...(code ? { code } : {})
+    };
+}
+function readStringProperty(value, property) {
+    const candidate = readDataProperty(value, property);
+    return typeof candidate === 'string' && candidate.length > 0
+        ? candidate
+        : undefined;
+}
+function readDataProperty(value, property) {
+    if (!isObjectLike(value))
+        return undefined;
+    const seen = new Set();
+    let current = value;
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        try {
+            const descriptor = Object.getOwnPropertyDescriptor(current, property);
+            if (descriptor)
+                return 'value' in descriptor ? descriptor.value : undefined;
+            current = Object.getPrototypeOf(current);
+        }
+        catch {
+            return undefined;
+        }
+    }
+    return undefined;
+}
+function isObjectLike(value) {
+    return ((typeof value === 'object' && value !== null) || typeof value === 'function');
+}
+function validHttpStatus(value) {
+    return typeof value === 'number' &&
+        Number.isSafeInteger(value) &&
+        value >= 100 &&
+        value <= 599
+        ? value
+        : undefined;
+}
+function firstValidStatus(value, properties) {
+    for (const property of properties) {
+        const status = validHttpStatus(readDataProperty(value, property));
+        if (status !== undefined)
+            return status;
+    }
+    return undefined;
+}
+function safeOperation(operation) {
+    const sanitized = sanitizeDiagnostic(operation);
+    return sanitized || 'API request';
+}
+function sanitizeToken(value) {
+    if (!value || !/^[A-Za-z0-9._:-]{1,64}$/.test(value))
+        return undefined;
+    return value;
+}
+function sanitizeDiagnostic(value) {
+    if (!value)
+        return undefined;
+    const sanitized = value
+        // Remove URLs before key/value redaction so query parameters cannot leak.
+        .replace(/\b[a-z][a-z\d+.-]{1,20}:\/\/[^\s<>"'`]+/gi, '[REDACTED_URL]')
+        .replace(/\b(Bearer|Basic)\s+[^\s,;}\]"']+/gi, '$1 [REDACTED]')
+        .replace(/((?:["']?(?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|client[-_]?secret|password|passwd|secret|token)["']?)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^,\s}\]]+)/gi, '$1[REDACTED]')
+        .replace(/[\u0000-\u001f\u007f]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!sanitized)
+        return undefined;
+    return sanitized.length > MAX_ERROR_MESSAGE_LENGTH
+        ? `${sanitized.slice(0, MAX_ERROR_MESSAGE_LENGTH - 1)}…`
+        : sanitized;
 }
 
 ;// CONCATENATED MODULE: ./src/shared/limits.ts
@@ -48420,12 +48667,12 @@ async function getCommitters(expectedHeadSha) {
         let identityAssertionCount = 0;
         const seenCursors = new Set();
         while (hasNextPage) {
-            const response = (await octokit.graphql(COMMITS_QUERY, {
+            const response = (await withGitHubApiError('graphql.committers', () => octokit.graphql(COMMITS_QUERY, {
                 owner: github_context.repo.owner,
                 name: github_context.repo.repo,
                 number: github_context.issue.number,
                 cursor
-            }));
+            })));
             const pullRequest = response?.repository?.pullRequest;
             if (!pullRequest ||
                 typeof pullRequest.headRefOid !== 'string' ||
@@ -48484,7 +48731,7 @@ async function getCommitters(expectedHeadSha) {
         return [...committers.values()];
     }
     catch (e) {
-        throw new Error(`GraphQL call to get commit identities failed: ${errorMessage(e)}`);
+        throw new Error(`GraphQL call to get commit identities failed: ${errorMessage(e)}`, { cause: e });
     }
 }
 function addCommitter(committers, incoming) {
@@ -48527,6 +48774,7 @@ function actorsMatch(left, right) {
 
 
 
+
 function resolveSignaturesTarget() {
     const remote = Boolean(getRemoteRepoName() || getRemoteOrgName());
     return {
@@ -48539,16 +48787,16 @@ function resolveSignaturesTarget() {
 }
 async function getFileContent() {
     const t = resolveSignaturesTarget();
-    return t.octokit.rest.repos.getContent({
+    return withGitHubApiError('contents.get', () => t.octokit.rest.repos.getContent({
         owner: t.owner,
         repo: t.repo,
         path: t.path,
         ref: t.branch
-    });
+    }));
 }
 async function createFile(contentBinary) {
     const t = resolveSignaturesTarget();
-    return t.octokit.rest.repos.createOrUpdateFileContents({
+    return withGitHubApiError('contents.create', () => t.octokit.rest.repos.createOrUpdateFileContents({
         owner: t.owner,
         repo: t.repo,
         path: t.path,
@@ -48556,7 +48804,7 @@ async function createFile(contentBinary) {
             'Creating file for storing CLA Signatures',
         content: contentBinary,
         branch: t.branch
-    });
+    }));
 }
 async function updateFile(sha, claFileContent, reactedCommitters, beforeWrite) {
     const t = resolveSignaturesTarget();
@@ -48584,7 +48832,7 @@ async function updateFile(sha, claFileContent, reactedCommitters, beforeWrite) {
             // a force-push or edited/deleted declaration cannot be carried into the
             // optimistic retry.
             await beforeWrite?.();
-            await t.octokit.rest.repos.createOrUpdateFileContents({
+            await withGitHubApiError('contents.update', () => t.octokit.rest.repos.createOrUpdateFileContents({
                 owner: t.owner,
                 repo: t.repo,
                 path: t.path,
@@ -48592,7 +48840,7 @@ async function updateFile(sha, claFileContent, reactedCommitters, beforeWrite) {
                 message: buildSignedCommitMessage(pullRequestNo),
                 content: contentBinary,
                 branch: t.branch
-            });
+            }));
             return;
         }
         catch (error) {
@@ -48712,6 +48960,7 @@ function getPrSignComment() {
 
 
 
+
 class PullRequestCommentLimitError extends Error {
 }
 /**
@@ -48723,40 +48972,47 @@ class PullRequestCommentLimitError extends Error {
 async function listBoundedPullRequestComments() {
     let observed = 0;
     let observedBodyBytes = 0;
-    return octokit.paginate(octokit.rest.issues.listComments, {
-        owner: github_context.repo.owner,
-        repo: github_context.repo.repo,
-        issue_number: github_context.issue.number,
-        per_page: 100
-    }, response => {
-        const page = response.data;
-        if (!Array.isArray(page)) {
-            throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment page. The action will fail closed.');
-        }
-        const boundedPage = [];
-        for (const comment of page) {
-            if (observed >= MAX_PULL_REQUEST_COMMENTS) {
-                throw new PullRequestCommentLimitError(`A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`);
+    try {
+        return await octokit.paginate(octokit.rest.issues.listComments, {
+            owner: github_context.repo.owner,
+            repo: github_context.repo.repo,
+            issue_number: github_context.issue.number,
+            per_page: 100
+        }, response => {
+            const page = response.data;
+            if (!Array.isArray(page)) {
+                throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment page. The action will fail closed.');
             }
-            observed += 1;
-            if (!comment || typeof comment !== 'object') {
-                throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment. The action will fail closed.');
+            const boundedPage = [];
+            for (const comment of page) {
+                if (observed >= MAX_PULL_REQUEST_COMMENTS) {
+                    throw new PullRequestCommentLimitError(`A Pull Request has more than ${MAX_PULL_REQUEST_COMMENTS} Pull Request comments. The action will fail closed.`);
+                }
+                observed += 1;
+                if (!comment || typeof comment !== 'object') {
+                    throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment. The action will fail closed.');
+                }
+                if (typeof comment.body !== 'string') {
+                    throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment body. The action will fail closed.');
+                }
+                const bodyBytes = Buffer.byteLength(comment.body, 'utf8');
+                if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BYTES - observedBodyBytes) {
+                    throw new PullRequestCommentLimitError(`The combined Pull Request comment bodies exceed ${MAX_PULL_REQUEST_COMMENT_BYTES} bytes. The action will fail closed.`);
+                }
+                observedBodyBytes += bodyBytes;
+                if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BODY_BYTES) {
+                    continue;
+                }
+                boundedPage.push(comment);
             }
-            if (typeof comment.body !== 'string') {
-                throw new PullRequestCommentLimitError('GitHub returned an invalid Pull Request comment body. The action will fail closed.');
-            }
-            const bodyBytes = Buffer.byteLength(comment.body, 'utf8');
-            if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BYTES - observedBodyBytes) {
-                throw new PullRequestCommentLimitError(`The combined Pull Request comment bodies exceed ${MAX_PULL_REQUEST_COMMENT_BYTES} bytes. The action will fail closed.`);
-            }
-            observedBodyBytes += bodyBytes;
-            if (bodyBytes > MAX_PULL_REQUEST_COMMENT_BODY_BYTES) {
-                continue;
-            }
-            boundedPage.push(comment);
-        }
-        return boundedPage;
-    });
+            return boundedPage;
+        });
+    }
+    catch (error) {
+        if (error instanceof PullRequestCommentLimitError)
+            throw error;
+        throw toGitHubApiError(error, 'issues.listComments');
+    }
 }
 
 ;// CONCATENATED MODULE: ./src/pullrequest/signatureComment.ts
@@ -49121,7 +49377,7 @@ async function applyCommentOperation(operation) {
     }
 }
 function commentOperationError(error) {
-    return new Error(`Error occured when creating or editing the comments of the pull request: ${errorMessage(error)}`);
+    return new Error(`Error occured when creating or editing the comments of the pull request: ${errorMessage(error)}`, { cause: error });
 }
 /**
  * Re-fetch the canonical bot marker immediately before a comment write. A
@@ -49175,29 +49431,30 @@ function mergeBotCommentSnapshot(previous, updated, fallbackBody) {
     };
 }
 async function createComment(signed, committerMap) {
-    await octokit.rest.issues
-        .createComment({
-        owner: github_context.repo.owner,
-        repo: github_context.repo.repo,
-        issue_number: github_context.issue.number,
-        body: commentContent(signed, committerMap)
-    })
-        .catch(error => {
-        throw new Error(`Error occured when creating a pull request comment: ${errorMessage(error)}`);
-    });
+    try {
+        await withGitHubApiError('issues.createComment', () => octokit.rest.issues.createComment({
+            owner: github_context.repo.owner,
+            repo: github_context.repo.repo,
+            issue_number: github_context.issue.number,
+            body: commentContent(signed, committerMap)
+        }));
+    }
+    catch (error) {
+        throw new Error(`Error occured when creating a pull request comment: ${errorMessage(error)}`, { cause: error });
+    }
 }
 async function updateComment(signed, committerMap, claBotComment) {
     try {
-        const response = await octokit.rest.issues.updateComment({
+        const response = await withGitHubApiError('issues.updateComment', () => octokit.rest.issues.updateComment({
             owner: github_context.repo.owner,
             repo: github_context.repo.repo,
             comment_id: claBotComment.id,
             body: commentContent(signed, committerMap)
-        });
+        }));
         return response.data;
     }
     catch (error) {
-        throw new Error(`Error occured when updating the pull request comment: ${errorMessage(error)}`);
+        throw new Error(`Error occured when updating the pull request comment: ${errorMessage(error)}`, { cause: error });
     }
 }
 async function getComment(comments) {
@@ -49212,9 +49469,9 @@ async function getComment(comments) {
         // GitHub's canonical Actions bot account and accept only a marker written
         // by that API identity. This avoids a hard-coded database ID while still
         // failing closed if GitHub cannot verify the bot account.
-        const canonicalBot = await octokit.rest.users.getByUsername({
+        const canonicalBot = await withGitHubApiError('users.getByUsername', () => octokit.rest.users.getByUsername({
             username: ACTIONS_BOT_LOGIN
-        });
+        }));
         if (canonicalBot.data.type !== 'Bot' ||
             canonicalBot.data.login.toLowerCase() !== ACTIONS_BOT_LOGIN ||
             !Number.isSafeInteger(canonicalBot.data.id) ||
@@ -49233,7 +49490,9 @@ async function getComment(comments) {
     catch (error) {
         if (error instanceof PullRequestCommentLimitError)
             throw error;
-        throw new Error('Could not retrieve or verify CLA bot comments');
+        throw new Error('Could not retrieve or verify CLA bot comments', {
+            cause: error
+        });
     }
 }
 function prepareCommiterMap(committerMap, reactedCommitters) {
@@ -49258,7 +49517,15 @@ function prepareAllSignedCommitters(committerMap, signedInPrCommitters, committe
     return allSignedFlag;
 }
 
+;// CONCATENATED MODULE: ./src/shared/apiResult.ts
+
+/** Publish the action's stable result contract for trusted downstream jobs. */
+function setApiResult(result) {
+    setOutput('api_result', result);
+}
+
 ;// CONCATENATED MODULE: ./src/livePullRequest.ts
+
 
 
 
@@ -49277,11 +49544,11 @@ const OPEN_PULL_REQUEST_TARGET_ACTIONS = new Set([
 async function validateLivePullRequest(expected) {
     const repository = `${github_context.repo.owner}/${github_context.repo.repo}`;
     const repositoryId = validateEvent(repository);
-    const response = await octokit.rest.pulls.get({
+    const response = await withGitHubApiError('pulls.get', () => octokit.rest.pulls.get({
         owner: github_context.repo.owner,
         repo: github_context.repo.repo,
         pull_number: github_context.issue.number
-    });
+    }));
     const pullRequest = response.data;
     const liveRepository = pullRequest.base.repo?.full_name;
     const liveRepositoryId = pullRequest.base.repo?.id;
@@ -49383,11 +49650,11 @@ async function validateMergedPullRequestForLock() {
         eventPullRequest.merged !== true) {
         throw new Error('Event is not a closed merged pull_request_target event; refusing to lock');
     }
-    const response = await octokit.rest.pulls.get({
+    const response = await withGitHubApiError('pulls.get', () => octokit.rest.pulls.get({
         owner: github_context.repo.owner,
         repo: github_context.repo.repo,
         pull_number: github_context.issue.number
-    });
+    }));
     const pullRequest = response.data;
     const requiredBaseRef = getRequiredBaseRef();
     const liveBaseRepository = pullRequest.base.repo;
@@ -49662,7 +49929,9 @@ function isCurrentSignature(comment) {
 
 
 
+
 async function setupClaCheck() {
+    setApiResult('error');
     // A caller may use this output to authorize a follow-up check refresh. Keep
     // it false unless this run actually persists a newly accepted signature.
     setOutput('signature_recorded', false);
@@ -49686,7 +49955,14 @@ async function setupClaCheck() {
         // diagnostic cannot omit the authenticated opener mismatch.
         committerMap.openerMismatch = openerMismatch;
     }
-    const claFile = await getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments, expectedSigningComment);
+    let claFile;
+    try {
+        claFile = await getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments, expectedSigningComment);
+    }
+    catch (err) {
+        failSetup(err);
+        return;
+    }
     // A missing ledger was created and no contributor remains after the
     // authenticated opener allowlist. The bootstrap path already published the
     // all-signed status, so no ledger update is required.
@@ -49722,21 +49998,30 @@ async function setupClaCheck() {
             // bot status unchanged.
             await commentPlan.apply();
             if (openerMismatch?.hardFail) {
+                setApiResult('error');
                 setFailed(openerMismatchError(openerMismatch));
                 return;
             }
+            setApiResult('success');
             setOutput('cla_passed', true);
             info(`All contributors have signed the CLA 📝 ✅ `);
             return;
         }
         else {
             await commentPlan.apply();
+            setApiResult('unsigned');
             setFailed(`Committers of Pull Request number ${github_context.issue.number} have to sign the CLA 📝`);
         }
     }
     catch (err) {
-        setFailed(`Could not complete the CLA check: ${errorMessage(err)}`);
+        failSetup(err);
     }
+}
+class UnsignedClaError extends Error {
+}
+function failSetup(error) {
+    setApiResult(error instanceof UnsignedClaError ? 'unsigned' : apiResultForError(error));
+    setFailed(`Could not complete the CLA check: ${errorMessage(error)}`);
 }
 async function getCLAFileContentandSHA(committers, committerMap, livePullRequest, pullRequestComments, expectedSigningComment) {
     let result;
@@ -49748,7 +50033,7 @@ async function getCLAFileContentandSHA(committers, committerMap, livePullRequest
             return createClaFileAndPRComment(committers, committerMap, livePullRequest, pullRequestComments, expectedSigningComment);
         }
         else {
-            throw new Error(`Could not retrieve repository contents. Status: ${errorStatus(error) ?? 'unknown'}`);
+            throw new Error(`Could not retrieve repository contents. Status: ${errorStatus(error) ?? 'unknown'}`, { cause: error });
         }
     }
     return parseClaFileResponse(result);
@@ -49836,7 +50121,7 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
             warning('Another Pull Request created the CLA signature ledger concurrently. Continuing with the confirmed ledger.');
             return recoveredLedger;
         }
-        throw new Error(`Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`);
+        throw new Error(`Error occurred when creating the signed contributors file: ${errorMessage(error)}. Ensure the configured trusted automation identity can write to the signature branch.`, { cause: error });
     }
     await validateLivePullRequest(livePullRequest);
     await validateExpectedSigningCommentLive(expectedSigningComment);
@@ -49852,9 +50137,10 @@ async function createClaFileAndPRComment(committers, committerMap, livePullReque
         // all-signed comment for an authenticated, allowlisted opener. Report a
         // pass only after that final comment write succeeded.
         setOutput('cla_passed', true);
+        setApiResult('success');
         return;
     }
-    throw new Error(`Committers of pull request ${github_context.issue.number} have to sign the CLA`);
+    throw new UnsignedClaError(`Committers of pull request ${github_context.issue.number} have to sign the CLA`);
 }
 async function recoverConcurrentLedgerCreate(createError) {
     const status = errorStatus(createError);
@@ -49868,7 +50154,7 @@ async function recoverConcurrentLedgerCreate(createError) {
         catch (readError) {
             if (errorStatus(readError) === 404)
                 continue;
-            throw new Error(`Could not verify the CLA signature ledger after a concurrent create. Status: ${errorStatus(readError) ?? 'unknown'}`);
+            throw new Error(`Could not verify the CLA signature ledger after a concurrent create. Status: ${errorStatus(readError) ?? 'unknown'}`, { cause: readError });
         }
         return parseClaFileResponse(result);
     }
@@ -49929,16 +50215,16 @@ function detectOpenerMismatch(commitAuthors, opener) {
 async function lockPullRequest() {
     const pullRequestNo = github_context.issue.number;
     try {
-        await octokit.rest.issues.lock({
+        await withGitHubApiError('issues.lock', () => octokit.rest.issues.lock({
             owner: github_context.repo.owner,
             repo: github_context.repo.repo,
             issue_number: pullRequestNo,
             lock_reason: 'resolved'
-        });
+        }));
         info(`Locked pull request ${pullRequestNo} to safeguard CLA signatures`);
     }
     catch (e) {
-        throw new Error(`Failed to lock pull request ${pullRequestNo}: ${errorMessage(e)}`);
+        throw new Error(`Failed to lock pull request ${pullRequestNo}: ${errorMessage(e)}`, { cause: e });
     }
 }
 
@@ -49973,6 +50259,7 @@ function requireHttpsDocumentUrl() {
 
 
 
+
 function setSignerDecision(decision) {
     setOutput('signer_decision', decision);
 }
@@ -49994,6 +50281,7 @@ async function runSignerPreflight() {
     const signPhrase = getPrSignComment();
     if (!commentMatchesPhrase(eventComment, signPhrase)) {
         info('The current Pull Request comment is not the configured exact signing declaration.');
+        setApiResult('success');
         return;
     }
     const comments = await listBoundedPullRequestComments();
@@ -50016,6 +50304,7 @@ async function runSignerPreflight() {
         requireOpenerAsAuthor() &&
         !isPullRequestOpenerAllowlisted(livePullRequest.opener)) {
         setSignerDecision('unauthorized');
+        setApiResult('error');
         setFailed(openerAuthorshipMismatchMessage(openerMismatch));
         return;
     }
@@ -50032,6 +50321,7 @@ async function runSignerPreflight() {
     setOutput('signer_authorized', authorized);
     if (!authorized) {
         setSignerDecision('unauthorized');
+        setApiResult('error');
         setFailed('The signing comment is not authored by an authenticated identity in the current Pull Request');
         return;
     }
@@ -50042,6 +50332,7 @@ async function runSignerPreflight() {
     setOutput('comment_created_at', canonicalComment.created_at);
     setOutput('comment_author_id', String(canonicalComment.user.id));
     setSignerDecision('authorized');
+    setApiResult('success');
 }
 function readEventComment() {
     if (github_context.eventName !== 'issue_comment' ||
@@ -50121,11 +50412,14 @@ function isPositiveSafeInteger(value) {
 
 
 
+
+
 async function run() {
     try {
         info(`CLA Assistant GitHub Action bot has started the process`);
         setOutput('signature_recorded', false);
         setOutput('cla_passed', false);
+        setApiResult('error');
         setOutput('signer_authorized', false);
         setSignerDecision('error');
         setOutput('head_sha', '');
@@ -50147,12 +50441,14 @@ async function run() {
                 github_context.payload.pull_request?.merged) {
                 await validateMergedPullRequestForLock();
                 await lockPullRequest();
+                setApiResult('success');
                 return;
             }
             const reason = github_context.payload.pull_request?.merged
                 ? 'automatic locking is disabled'
                 : 'it was not merged';
             info(`Pull request ${github_context.issue.number} is closed and ${reason}`);
+            setApiResult('success');
             return;
         }
         if (github_context.payload.action === 'reopened' &&
@@ -50162,8 +50458,8 @@ async function run() {
         await setupClaCheck();
     }
     catch (error) {
-        if (error instanceof Error)
-            setFailed(error.message);
+        setApiResult(apiResultForError(error));
+        setFailed(errorMessage(error));
     }
 }
 if (process.env.NODE_ENV !== 'test') {

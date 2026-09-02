@@ -330,7 +330,7 @@ describe('bug fixes', () => {
       watch.restore()
     })
 
-    it('passes when the first Pull Request opener is allowlisted', async () => {
+    it('passes when the sole Pull Request opener is allowlisted', async () => {
       const watch = watchCore()
       const repository = fake.repo('acme', 'widgets')
       setInput('allowlist-ids', '49699333')
