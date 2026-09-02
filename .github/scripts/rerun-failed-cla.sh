@@ -298,7 +298,7 @@ assert_exact_pr_association() {
   jq -e \
     --arg repo "${GH_REPO}" \
     --arg pr "${PR_NUMBER}" \
-    --arg sha "${expected_sha}" \
+    --arg source_sha "${expected_sha}" \
     --arg base "${TARGET_BASE_REF}" \
     --arg base_sha "${base_sha}" \
     --arg head_ref "${head_ref}" \
@@ -315,7 +315,7 @@ assert_exact_pr_association() {
         (.base.sha | type == "string") and
         .base.sha == $base_sha and
         .head.ref == $head_ref and
-        .head.sha == $sha and
+        .head.sha == $source_sha and
         .head.repo.full_name == $head_repo and
         (.head.repo.id | type == "number") and
         .head.repo.id == $head_repo_id
@@ -378,7 +378,7 @@ validate_live_open_head_association() {
   open_prs_json="$(jq -c '[.]' <<<"${open_prs_page}")"
   if ! matching_open_prs_json="$(jq -c \
       --arg repo "${GH_REPO}" \
-      --arg sha "${head_sha}" \
+      --arg source_sha "${head_sha}" \
       --arg base_sha "${base_sha}" \
       --arg base "${TARGET_BASE_REF}" \
       --arg head_ref "${head_ref}" \
@@ -396,7 +396,7 @@ validate_live_open_head_association() {
               (.base.sha | type == "string") and
               .base.sha == $base_sha and
               .head.ref == $head_ref and
-              .head.sha == $sha and
+              .head.sha == $source_sha and
               .head.repo.full_name == $head_repo and
               (.head.repo.id | type == "number") and
               .head.repo.id == $head_repo_id
@@ -421,7 +421,7 @@ validate_exact_pr_snapshot() {
   jq -e \
     --arg repo "${GH_REPO}" \
     --argjson number "${PR_NUMBER}" \
-    --arg sha "${head_sha}" \
+    --arg source_sha "${head_sha}" \
     --arg base_sha "${base_sha}" \
     --arg base "${TARGET_BASE_REF}" \
     --arg head_ref "${head_ref}" \
@@ -436,7 +436,7 @@ validate_exact_pr_snapshot() {
       .base.repo.id == $base_repo_id and
       (.base.sha | type == "string") and
       .base.sha == $base_sha and
-      .head.sha == $sha and
+      .head.sha == $source_sha and
       .head.ref == $head_ref and
       .head.repo.full_name == $head_repo and
       .head.repo.id == $head_repo_id and
@@ -480,7 +480,10 @@ workflow_id="$(jq -r --arg path "${WORKFLOW_PATH}" '[.[] | .workflows[]? | selec
 # newest one. Every candidate is tied to the exact workflow path and event.
 # When GitHub includes pull_requests on a run, bind the candidate to the exact
 # PR object, including its source head and live base SHAs. GitHub can return an
-# empty array for pull_request_target runs. Those candidates are accepted when
+# `.head_sha` on a workflow run is the Actions execution SHA, not necessarily
+# the Pull Request source SHA; it is validated against the exact run and check
+# below. The source SHA is read only from the live Pull Request association.
+# Empty arrays for pull_request_target runs are accepted when
 # their source repository metadata is complete; the exact run and live PR are
 # re-read below, and a non-base execution is additionally bound to its source
 # head check before any rerun. Missing metadata cannot identify which fork
@@ -548,7 +551,7 @@ fi
 if ! candidate_list_json="$(jq -c \
     --arg path "${WORKFLOW_PATH}" \
     --arg event "${TARGET_EVENT}" \
-    --arg sha "${head_sha}" \
+    --arg source_sha "${head_sha}" \
     --arg base_sha "${base_sha}" \
     --arg workflow_id "${workflow_id}" \
     --arg pr "${PR_NUMBER}" \
@@ -585,7 +588,7 @@ if ! candidate_list_json="$(jq -c \
             (.base.repo.id | type == "number") and
             .base.repo.id == $repo_id and
             .head.ref == $head_ref and
-            .head.sha == $sha and
+            .head.sha == $source_sha and
             (.head.repo.id | type == "number") and
             .head.repo.id == $head_repo_id and
             ((.head.repo.full_name // "") == "" or
@@ -640,7 +643,7 @@ if [[ "${candidate_count}" == "0" ]]; then
   empty_execution_mismatch_count="$(jq -r \
     --arg path "${WORKFLOW_PATH}" \
     --arg event "${TARGET_EVENT}" \
-    --arg sha "${base_sha}" \
+    --arg execution_sha "${base_sha}" \
     --arg workflow_id "${workflow_id}" \
     --arg head_repo "${head_repo}" \
     --argjson head_repo_id "${head_repo_id}" \
@@ -658,7 +661,7 @@ if [[ "${candidate_count}" == "0" ]]; then
           (.head_sha | type == "string") and
           (.head_sha | test("^[0-9a-f]{40}$")) and
           (
-            .head_sha != $sha or
+            .head_sha != $execution_sha or
             (.head_repository | type) != "object" or
             .head_repository.full_name != $head_repo or
             (.head_repository.id | type) != "number" or
@@ -690,7 +693,7 @@ if [[ "${candidate_count}" == "0" ]]; then
   stale_base_count="$(jq -r \
     --arg path "${WORKFLOW_PATH}" \
     --arg event "${TARGET_EVENT}" \
-    --arg sha "${head_sha}" \
+    --arg source_sha "${head_sha}" \
     --arg workflow_id "${workflow_id}" \
     --arg pr "${PR_NUMBER}" \
     --arg repo "${GH_REPO}" \
@@ -733,7 +736,7 @@ if [[ "${candidate_count}" == "0" ]]; then
             (.base.repo.id | type == "number") and
             .base.repo.id == $repo_id and
             .head.ref == $head_ref and
-            .head.sha == $sha and
+            .head.sha == $source_sha and
             (.head.repo.id | type == "number") and
             .head.repo.id == $head_repo_id and
             .head.repo.full_name == $head_repo and
@@ -756,7 +759,7 @@ if [[ "${candidate_count}" == "0" ]]; then
   stale_run_count="$(jq -r \
     --arg path "${WORKFLOW_PATH}" \
     --arg event "${TARGET_EVENT}" \
-    --arg sha "${head_sha}" \
+    --arg source_sha "${head_sha}" \
     --arg workflow_id "${workflow_id}" \
     --arg pr "${PR_NUMBER}" \
     --arg repo "${GH_REPO}" \
@@ -794,7 +797,7 @@ if [[ "${candidate_count}" == "0" ]]; then
            (.base.repo.id | type == "number") and
            .base.repo.id == $repo_id and
            .head.ref == $head_ref and
-           .head.sha == $sha and
+           .head.sha == $source_sha and
            (.head.repo.id | type == "number") and
            .head.repo.id == $head_repo_id and
            ((.head.repo.full_name // "") == "" or
@@ -907,7 +910,7 @@ assert_failed_check_binding() {
   [[ "${expected_check_sha}" =~ ^[0-9a-f]{40}$ ]] || return 1
   matching_count="$(jq -r \
     --arg job "${expected_check_name}" \
-    --arg sha "${expected_check_sha}" \
+    --arg expected_sha "${expected_check_sha}" \
     --arg url "${details_url}" \
     --argjson app_id "${CLA_ACTION_APP_ID}" '
       [ .check_runs[]?
@@ -918,7 +921,7 @@ assert_failed_check_binding() {
         .status == "completed" and
         .conclusion == "failure" and
         (.head_sha | type == "string") and
-        .head_sha == $sha and
+        .head_sha == $expected_sha and
         (.app | type == "object") and
         (.app.id | type == "number") and
         .app.id == $app_id and
@@ -1010,7 +1013,7 @@ validate_exact_run_payload() {
     --arg run_id "${run_id}" \
     --arg path "${WORKFLOW_PATH}" \
     --arg event "${TARGET_EVENT}" \
-    --arg sha "${head_sha}" \
+    --arg source_sha "${head_sha}" \
     --arg run_sha "${run_execution_sha}" \
     --arg run_head_branch "${run_head_branch}" \
     --arg pr "${PR_NUMBER}" \
@@ -1048,7 +1051,7 @@ validate_exact_run_payload() {
             (.base.repo.id | type == "number") and
             .base.repo.id == $repo_id and
             .head.ref == $head_ref and
-            .head.sha == $sha and
+            .head.sha == $source_sha and
             (.head.repo.id | type == "number") and
             .head.repo.id == $head_repo_id and
             ((.head.repo.full_name // "") == "" or
