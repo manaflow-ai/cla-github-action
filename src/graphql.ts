@@ -27,7 +27,6 @@ interface GraphQLAuthorsConnection {
 interface GraphQLCommit {
   author?: GraphQLActor | null
   authors: GraphQLAuthorsConnection
-  committer?: GraphQLActor | null
 }
 
 interface GraphQLEdge {
@@ -48,7 +47,7 @@ interface GraphQLResponse {
   }
 }
 
-type CommitIdentityRole = 'primaryAuthor' | 'coAuthor' | 'committer'
+type CommitIdentityRole = 'primaryAuthor' | 'coAuthor'
 
 // Bound work on untrusted Pull Request data. These limits are well above a
 // normal contribution but stop a single PR from consuming an unbounded number
@@ -76,11 +75,6 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
                                 }
                                 pageInfo { endCursor hasNextPage }
                             }
-                            committer {
-                                email
-                                name
-                                user { databaseId login }
-                            }
                         }
                     }
                     cursor
@@ -94,11 +88,11 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
 /**
  * GitHub's Commit.authors connection is the identity source for the primary
  * author and Co-authored-by trailers. GitHub documents that the primary git
- * author is always first. Every actor in git metadata remains an assertion,
- * even when GitHub maps its email to an account. Callers require a current-PR
- * signature unless the live Pull Request API independently authenticates the
- * same account as the opener. Committer metadata does not qualify an opener
- * for the author/co-author guard.
+ * author is always first. Only primary authors must sign; co-authors are
+ * collected so the opener authorship guard can accept a Co-authored-by
+ * trailer. The git committer field is ignored: it names whoever applied the
+ * commit (a maintainer, GitHub's web-flow merge, a rebase tool), not a
+ * copyright holder, so it never creates a signing obligation.
  */
 export default async function getCommitters(
   expectedHeadSha: string
@@ -117,9 +111,7 @@ export default async function getCommitters(
     ): void => {
       const roles = {
         isPrimaryAuthor: role === 'primaryAuthor',
-        isCoAuthor: role === 'coAuthor',
-        isCommitter: role === 'committer',
-        requiresCurrentSignature: true
+        isCoAuthor: role === 'coAuthor'
       }
       if (!actor) {
         addCommitter(committers, {
@@ -211,7 +203,7 @@ export default async function getCommitters(
           )
         }
 
-        identityAssertionCount += commit.authors.nodes.length + 1
+        identityAssertionCount += commit.authors.nodes.length
         if (identityAssertionCount > MAX_GIT_IDENTITY_ASSERTIONS) {
           throw new Error(
             `A Pull Request reports more than ${MAX_GIT_IDENTITY_ASSERTIONS} git identity assertions. The action will fail closed.`
@@ -222,7 +214,6 @@ export default async function getCommitters(
         commit.authors.nodes
           .slice(1)
           .forEach(actor => addActor(actor, 'coAuthor'))
-        addActor(commit.committer, 'committer')
       }
 
       hasNextPage = page.pageInfo.hasNextPage
@@ -271,12 +262,6 @@ function addCommitter(
     current.isPrimaryAuthor || incoming.isPrimaryAuthor
   )
   current.isCoAuthor = Boolean(current.isCoAuthor || incoming.isCoAuthor)
-  current.isCommitter = Boolean(current.isCommitter || incoming.isCommitter)
-  // Every git role is attacker-controlled metadata. Dedupe must never relax
-  // the current-signature rule. The authenticated live opener is added later.
-  current.requiresCurrentSignature = Boolean(
-    current.requiresCurrentSignature || incoming.requiresCurrentSignature
-  )
   if (!current.email && incoming.email) current.email = incoming.email
 }
 

@@ -33,7 +33,8 @@ import {
 import {
   findOpenerAuthorshipMismatch,
   includePullRequestOpener,
-  openerAuthorshipMismatchMessage
+  openerAuthorshipMismatchMessage,
+  requiredSigners
 } from './shared/committers'
 import {
   MAX_LEDGER_BYTES,
@@ -71,7 +72,7 @@ export async function setupClaCheck() {
     livePullRequest.opener
   )
   let committers = includePullRequestOpener(
-    commitAuthors,
+    requiredSigners(commitAuthors),
     livePullRequest.opener,
     context.issue.number
   )
@@ -378,15 +379,16 @@ function prepareCommiterMap(
   return committerMap
 }
 
+/**
+ * A ledger signature belongs to a GitHub account ID and is reusable in every
+ * later Pull Request, whichever role that account plays. Unlinked identities
+ * have no account ID and can never match.
+ */
 function hasReusableStoredSignature(
   committer: Committer,
   claFileContent: ClaFileContent
 ): boolean {
-  if (
-    committer.id <= 0 ||
-    (committer.requiresCurrentSignature && !committer.isPullRequestOpener)
-  )
-    return false
+  if (committer.id <= 0) return false
   return claFileContent.signedContributors.some(cla => committer.id === cla.id)
 }
 

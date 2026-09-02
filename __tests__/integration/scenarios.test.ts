@@ -421,12 +421,12 @@ describe('CLA action end-to-end scenarios', () => {
     expect(sigFile.signedContributors).toEqual([])
   })
 
-  it('does not exempt an allowlisted ID unless it is the authenticated live opener', async () => {
+  it('exempts an allowlisted commit author who is not the opener', async () => {
     const watch = watchCore()
     setInput('allowlist-ids', '2002')
     fake.repo('acme', 'widgets').addPullRequest({
       number: 28,
-      head: { sha: 'headsha', ref: 'feature/forged-allowlist' },
+      head: { sha: 'headsha', ref: 'feature/allowlisted-author' },
       user: { login: 'alice', id: 1001 },
       commits: [
         {
@@ -435,11 +435,9 @@ describe('CLA action end-to-end scenarios', () => {
         }
       ]
     })
+    // Only alice has signed. bob is allowlisted, so his commit needs nothing.
     fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
-      signedContributors: [
-        { name: 'alice', id: 1001 },
-        { name: 'bob', id: 2002 }
-      ]
+      signedContributors: [{ name: 'alice', id: 1001 }]
     })
     fake.repo('acme', 'widgets').addComment(28, {
       body: '**CLA Assistant Lite bot**: notice',
@@ -468,11 +466,9 @@ describe('CLA action end-to-end scenarios', () => {
 
     await runAction()
 
-    expect(watch.failures.join('\n')).toMatch(
-      /Committers of Pull Request number 28/
-    )
-    expect(fake.repo('acme', 'widgets').listComments(28)[0]!.body).toContain(
-      ':x: [bob](https://github.com/bob)'
+    expect(watch.failures).toEqual([])
+    expect(fake.repo('acme', 'widgets').listComments(28)[0]!.body).toMatch(
+      /all contributors have signed the cla/i
     )
     watch.restore()
   })
@@ -631,11 +627,11 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('does not reuse a prior signature for a forged non-opener primary author', async () => {
+  it('reuses a prior ledger signature for a non-opener primary author', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 30,
-      head: { sha: 'headsha', ref: 'feature/forged-primary-author' },
+      head: { sha: 'headsha', ref: 'feature/reused-primary-author' },
       user: { login: 'alice', id: 1001 },
       commits: [
         {
@@ -677,11 +673,9 @@ describe('CLA action end-to-end scenarios', () => {
 
     await runAction()
 
-    expect(watch.failures.join('\n')).toMatch(
-      /Committers of Pull Request number 30/
-    )
-    expect(fake.repo('acme', 'widgets').listComments(30)[0]!.body).toContain(
-      ':x: [bob](https://github.com/bob)'
+    expect(watch.failures).toEqual([])
+    expect(fake.repo('acme', 'widgets').listComments(30)[0]!.body).toMatch(
+      /all contributors have signed the cla/i
     )
     watch.restore()
   })
@@ -1128,7 +1122,7 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('Co-authored-by trailers count as committers', async () => {
+  it('Co-authored-by trailers are not required signers', async () => {
     const watch = watchCore()
     // Commit authored by alice, co-authored by bob (via noreply id form).
     fake.repo('acme', 'widgets').addPullRequest({
@@ -1170,68 +1164,14 @@ describe('CLA action end-to-end scenarios', () => {
     const comments = fake.repo('acme', 'widgets').listComments(14)
     expect(comments).toHaveLength(1)
     const body = comments[0]!.body
-    // Alice shows as signed, bob as unsigned.
-    expect(body).toContain(
-      ':white_check_mark: [alice](https://github.com/alice)'
-    )
-    expect(body).toContain(':x: [bob](https://github.com/bob)')
-    expect(watch.failures.join('\n')).toMatch(
-      /Committers of Pull Request number 14/
-    )
+    // Alice signed earlier; the co-author trailer creates no obligation.
+    expect(body).toMatch(/all contributors have signed the cla/i)
+    expect(body).not.toContain('bob')
+    expect(watch.failures).toEqual([])
     watch.restore()
   })
 
-  it('does not accept a prior signature for an asserted co-author without a current sign comment', async () => {
-    const watch = watchCore()
-    fake.repo('acme', 'widgets').addPullRequest({
-      number: 15,
-      head: { sha: 'headsha', ref: 'feature/forged-coauthor' },
-      commits: [
-        {
-          author: { login: 'alice', id: 1001 },
-          coAuthors: [{ login: 'bob', name: 'Bob', id: 2002 }],
-          message:
-            'Implement thing\n\nCo-authored-by: Bob <2002+bob@users.noreply.github.com>'
-        }
-      ]
-    })
-    // Both identities have prior signatures. The co-author trailer is still
-    // only a claim, so Bob must sign this PR explicitly.
-    fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
-      signedContributors: [
-        { name: 'alice', id: 1001 },
-        { name: 'bob', id: 2002 }
-      ]
-    })
-
-    setContext({
-      owner: 'acme',
-      repo: 'widgets',
-      issueNumber: 15,
-      actor: 'alice',
-      eventName: 'pull_request_target',
-      payload: {
-        action: 'opened',
-        pull_request: {
-          number: 15,
-          state: 'open',
-          user: { login: 'alice', id: 1001 }
-        },
-        repository: { id: fake.repo('acme', 'widgets').state.id }
-      }
-    })
-
-    await runAction()
-
-    expect(watch.failures.join('\n')).toMatch(
-      /Committers of Pull Request number 15/
-    )
-    const body = fake.repo('acme', 'widgets').listComments(15)[0]!.body
-    expect(body).toContain(':x: [bob](https://github.com/bob)')
-    watch.restore()
-  })
-
-  it('Co-authored-by trailer with a non-noreply email routes to the unlinked-email warning', async () => {
+  it('Co-authored-by trailer with an unlinked email does not block the check', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 15,
@@ -1268,8 +1208,10 @@ describe('CLA action end-to-end scenarios', () => {
     await runAction()
 
     const body = fake.repo('acme', 'widgets').listComments(15)[0]!.body
-    expect(body).toContain('[!WARNING]')
-    expect(body).toContain('carol@example.com')
+    expect(body).not.toContain('[!WARNING]')
+    expect(body).not.toContain('carol@example.com')
+    expect(body).toMatch(/all contributors have signed the cla/i)
+    expect(watch.failures).toEqual([])
     watch.restore()
   })
 
@@ -1379,7 +1321,7 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('requires both the commit author and a different committer to sign', async () => {
+  it('does not require the git committer to sign', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 18,
@@ -1414,14 +1356,13 @@ describe('CLA action end-to-end scenarios', () => {
     await runAction()
 
     const body = fake.repo('acme', 'widgets').listComments(18)[0]!.body
-    expect(body).toContain(':x: [bob](https://github.com/bob)')
-    expect(watch.failures.join('\n')).toMatch(
-      /Committers of Pull Request number 18/
-    )
+    expect(body).not.toContain('bob')
+    expect(body).toMatch(/all contributors have signed the cla/i)
+    expect(watch.failures).toEqual([])
     watch.restore()
   })
 
-  it('does not exempt forged GitHub infrastructure committer metadata', async () => {
+  it('ignores the GitHub web-flow committer identity on merge commits', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 21,
@@ -1456,11 +1397,10 @@ describe('CLA action end-to-end scenarios', () => {
     await runAction()
 
     const body = fake.repo('acme', 'widgets').listComments(21)[0]!.body
-    expect(body).toContain('[!WARNING]')
-    expect(body).toContain('noreply@github.com')
-    expect(watch.failures.join('\n')).toMatch(
-      /Committers of Pull Request number 21/
-    )
+    expect(body).not.toContain('[!WARNING]')
+    expect(body).not.toContain('noreply@github.com')
+    expect(body).toMatch(/all contributors have signed the cla/i)
+    expect(watch.failures).toEqual([])
     watch.restore()
   })
 
@@ -1522,11 +1462,11 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
-  it('does not reuse a prior signature for a committer-only identity', async () => {
+  it('never lists a committer-only identity as a contributor', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({
       number: 25,
-      head: { sha: 'headsha', ref: 'feature/committer-signature' },
+      head: { sha: 'headsha', ref: 'feature/committer-only' },
       user: { login: 'alice', id: 1001 },
       commits: [
         {
@@ -1536,10 +1476,7 @@ describe('CLA action end-to-end scenarios', () => {
       ]
     })
     fake.repo('acme', 'widgets').setFile('signatures/cla.json', {
-      signedContributors: [
-        { name: 'alice', id: 1001 },
-        { name: 'bob', id: 2002 }
-      ]
+      signedContributors: [{ name: 'alice', id: 1001 }]
     })
     setContext({
       owner: 'acme',
@@ -1560,15 +1497,14 @@ describe('CLA action end-to-end scenarios', () => {
 
     await runAction()
 
-    expect(watch.failures.join('\n')).toMatch(
-      /Committers of Pull Request number 25/
-    )
+    expect(watch.failures).toEqual([])
     const body = fake.repo('acme', 'widgets').listComments(25)[0]!.body
-    expect(body).toContain(':x: [bob](https://github.com/bob)')
+    expect(body).not.toContain('bob')
+    expect(body).toMatch(/all contributors have signed the cla/i)
     watch.restore()
   })
 
-  it('allows a maintainer cherry-pick with the opener guard opt-out and a current non-opener signature', async () => {
+  it('allows a maintainer cherry-pick with the opener guard opt-out and a prior non-opener signature', async () => {
     const watch = watchCore()
     setInput('require-opener-as-author', 'false')
     fake.repo('acme', 'widgets').addPullRequest({
@@ -1587,18 +1523,6 @@ describe('CLA action end-to-end scenarios', () => {
         { name: 'alice', id: 1001 },
         { name: 'bob', id: 2002 }
       ]
-    })
-    fake.repo('acme', 'widgets').addComment(26, {
-      body: '**CLA Assistant Lite bot**: notice',
-      user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' }
-    })
-    fake.repo('acme', 'widgets').addComment(26, {
-      body: 'I have read the CLA Document and I hereby sign the CLA',
-      user: { login: 'alice', id: 1001, type: 'User' }
-    })
-    fake.repo('acme', 'widgets').addComment(26, {
-      body: 'I have read the CLA Document and I hereby sign the CLA',
-      user: { login: 'bob', id: 2002, type: 'User' }
     })
     setContext({
       owner: 'acme',
@@ -1828,7 +1752,7 @@ describe('CLA action end-to-end scenarios', () => {
     await runAction()
 
     expect(watch.failures.join('\n')).toMatch(
-      /more than 101000 git identity assertions/i
+      /more than 100000 git identity assertions/i
     )
     expect(fake.repo('acme', 'widgets').listComments(33)).toHaveLength(0)
     watch.restore()

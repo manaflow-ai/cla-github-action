@@ -15,7 +15,8 @@ import {
 import {
   findOpenerAuthorshipMismatch,
   includePullRequestOpener,
-  openerAuthorshipMismatchMessage
+  openerAuthorshipMismatchMessage,
+  requiredSigners
 } from './shared/committers'
 import { getPrSignComment } from './shared/pr-sign-comment'
 import { requireOpenerAsAuthor } from './shared/getInputs'
@@ -90,7 +91,7 @@ export async function runSignerPreflight(): Promise<void> {
   }
 
   const committers = includePullRequestOpener(
-    commitAuthors,
+    requiredSigners(commitAuthors),
     livePullRequest.opener,
     context.issue.number
   )

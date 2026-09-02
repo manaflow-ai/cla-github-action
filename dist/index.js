@@ -48175,10 +48175,11 @@ function parsePositiveSafeInteger(value) {
 
 
 /**
- * Exempt only the identity authenticated by the live Pull Request API as the
- * opener, and only when its database ID is explicitly configured. GitHub may
- * map forgeable commit emails to account IDs, so a commit-derived ID alone is
- * never enough for an exemption.
+ * Exempt every identity whose GitHub database ID is explicitly configured,
+ * whether it is the authenticated opener or a commit author. Configured IDs
+ * are maintainers whose contributions are already covered, so a commit that
+ * GitHub attributes to one of them needs no signature in any Pull Request.
+ * Unlinked identities (id 0) can never match.
  */
 function checkAllowList(committers) {
     const legacy = getAllowListItem().trim();
@@ -48189,12 +48190,11 @@ function checkAllowList(committers) {
     if (invalid.length > 0) {
         warning(`Invalid allowlist-ids entries were ignored: ${invalid.join(', ')}`);
     }
-    return committers.filter(committer => committer &&
-        !(committer.isPullRequestOpener && isAllowlistedId(committer.id, ids)));
+    return committers.filter(committer => committer && !isAllowlistedId(committer.id, ids));
 }
 /**
  * Check an authenticated live Pull Request opener against the numeric ID
- * allowlist. Commit-derived identities must never be passed as the opener.
+ * allowlist. This decides whether the opener authorship guard may hard-fail.
  * Invalid configuration is ignored here; the normal filtering path reports
  * configuration warnings before it removes any contributor.
  */
@@ -48305,7 +48305,7 @@ const MAX_PULL_REQUEST_COMMITS = 1000;
 // the commit limit does not fail early merely because each commit has a
 // committer assertion too.
 const MAX_AUTHORS_PER_COMMIT = 100;
-const MAX_GIT_IDENTITY_ASSERTIONS = MAX_PULL_REQUEST_COMMITS * (MAX_AUTHORS_PER_COMMIT + 1);
+const MAX_GIT_IDENTITY_ASSERTIONS = MAX_PULL_REQUEST_COMMITS * MAX_AUTHORS_PER_COMMIT;
 const MAX_PULL_REQUEST_COMMENTS = 1000;
 // Bound contributor-controlled comment bodies before the action retains a
 // complete paginated history. Counts use UTF-8 bytes, not JavaScript code
@@ -48354,11 +48354,6 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
                                 }
                                 pageInfo { endCursor hasNextPage }
                             }
-                            committer {
-                                email
-                                name
-                                user { databaseId login }
-                            }
                         }
                     }
                     cursor
@@ -48371,11 +48366,11 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
 /**
  * GitHub's Commit.authors connection is the identity source for the primary
  * author and Co-authored-by trailers. GitHub documents that the primary git
- * author is always first. Every actor in git metadata remains an assertion,
- * even when GitHub maps its email to an account. Callers require a current-PR
- * signature unless the live Pull Request API independently authenticates the
- * same account as the opener. Committer metadata does not qualify an opener
- * for the author/co-author guard.
+ * author is always first. Only primary authors must sign; co-authors are
+ * collected so the opener authorship guard can accept a Co-authored-by
+ * trailer. The git committer field is ignored: it names whoever applied the
+ * commit (a maintainer, GitHub's web-flow merge, a rebase tool), not a
+ * copyright holder, so it never creates a signing obligation.
  */
 async function getCommitters(expectedHeadSha) {
     try {
@@ -48386,9 +48381,7 @@ async function getCommitters(expectedHeadSha) {
         const addActor = (actor, role) => {
             const roles = {
                 isPrimaryAuthor: role === 'primaryAuthor',
-                isCoAuthor: role === 'coAuthor',
-                isCommitter: role === 'committer',
-                requiresCurrentSignature: true
+                isCoAuthor: role === 'coAuthor'
             };
             if (!actor) {
                 addCommitter(committers, {
@@ -48456,7 +48449,7 @@ async function getCommitters(expectedHeadSha) {
                 if (!actorsMatch(commit.author, commit.authors.nodes[0])) {
                     throw new Error('GitHub returned an author connection that did not start with the primary author. The action will fail closed.');
                 }
-                identityAssertionCount += commit.authors.nodes.length + 1;
+                identityAssertionCount += commit.authors.nodes.length;
                 if (identityAssertionCount > MAX_GIT_IDENTITY_ASSERTIONS) {
                     throw new Error(`A Pull Request reports more than ${MAX_GIT_IDENTITY_ASSERTIONS} git identity assertions. The action will fail closed.`);
                 }
@@ -48464,7 +48457,6 @@ async function getCommitters(expectedHeadSha) {
                 commit.authors.nodes
                     .slice(1)
                     .forEach(actor => addActor(actor, 'coAuthor'));
-                addActor(commit.committer, 'committer');
             }
             hasNextPage = page.pageInfo.hasNextPage;
             if (hasNextPage) {
@@ -48496,10 +48488,6 @@ function addCommitter(committers, incoming) {
     }
     current.isPrimaryAuthor = Boolean(current.isPrimaryAuthor || incoming.isPrimaryAuthor);
     current.isCoAuthor = Boolean(current.isCoAuthor || incoming.isCoAuthor);
-    current.isCommitter = Boolean(current.isCommitter || incoming.isCommitter);
-    // Every git role is attacker-controlled metadata. Dedupe must never relax
-    // the current-signature rule. The authenticated live opener is added later.
-    current.requiresCurrentSignature = Boolean(current.requiresCurrentSignature || incoming.requiresCurrentSignature);
     if (!current.email && incoming.email)
         current.email = incoming.email;
 }
@@ -49478,6 +49466,15 @@ function validatePayloadAgainstLive(live, repository) {
 
 ;// CONCATENATED MODULE: ./src/shared/committers.ts
 /**
+ * Reduce commit identities to the ones that must sign: primary commit
+ * authors. Co-authored-by trailers are unverified text that commonly names
+ * pairing partners and AI coding agents; they satisfy the opener authorship
+ * guard but never create a signing obligation of their own.
+ */
+function requiredSigners(commitAuthors) {
+    return commitAuthors.filter(committer => committer.isPrimaryAuthor);
+}
+/**
  * Include the authenticated Pull Request opener as a contributor when the
  * opener is not present in git metadata. Git author and committer fields are
  * assertions, so the live Pull Request identity must remain a separate
@@ -49502,8 +49499,7 @@ function includePullRequestOpener(committers, opener, pullRequestNo) {
 /**
  * Return an authenticated opener mismatch when no primary-author or
  * co-author identity in the current commit set has the opener's account ID.
- * Committer-only matches do not qualify because the committer field is still
- * attacker-controlled git metadata.
+ * The git committer field is never collected, so it cannot qualify.
  */
 function findOpenerAuthorshipMismatch(commitAuthors, opener) {
     const authorshipIdentities = commitAuthors.filter(committer => committer.isPrimaryAuthor || committer.isCoAuthor);
@@ -49678,7 +49674,7 @@ async function setupClaCheck() {
     let committerMap = getInitialCommittersMap();
     const commitAuthors = await getCommitters(livePullRequest.headSha);
     const openerMismatch = detectOpenerMismatch(commitAuthors, livePullRequest.opener);
-    let committers = includePullRequestOpener(commitAuthors, livePullRequest.opener, github_context.issue.number);
+    let committers = includePullRequestOpener(requiredSigners(commitAuthors), livePullRequest.opener, github_context.issue.number);
     committers = checkAllowList(committers);
     if (openerMismatch) {
         // The missing-ledger bootstrap path publishes the first bot comment before
@@ -49885,9 +49881,13 @@ function setupClaCheck_prepareCommiterMap(committers, claFileContent) {
     });
     return committerMap;
 }
+/**
+ * A ledger signature belongs to a GitHub account ID and is reusable in every
+ * later Pull Request, whichever role that account plays. Unlinked identities
+ * have no account ID and can never match.
+ */
 function hasReusableStoredSignature(committer, claFileContent) {
-    if (committer.id <= 0 ||
-        (committer.requiresCurrentSignature && !committer.isPullRequestOpener))
+    if (committer.id <= 0)
         return false;
     return claFileContent.signedContributors.some(cla => committer.id === cla.id);
 }
@@ -50019,7 +50019,7 @@ async function runSignerPreflight() {
         setFailed(openerAuthorshipMismatchMessage(openerMismatch));
         return;
     }
-    const committers = includePullRequestOpener(commitAuthors, livePullRequest.opener, github_context.issue.number);
+    const committers = includePullRequestOpener(requiredSigners(commitAuthors), livePullRequest.opener, github_context.issue.number);
     const committerMap = {
         signed: [],
         notSigned: committers,
