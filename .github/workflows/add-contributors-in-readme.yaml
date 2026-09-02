@@ -5,16 +5,22 @@ on:
     branches:
       - master
 
-permissions:
-  contents: write
+permissions: {}
+
+concurrency:
+  group: contributors-readme-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   contrib-readme-job:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     name: A job to automate contrib in readme
+    permissions:
+      contents: write # update the generated README on the action branch
+      pull-requests: write # open the update PR when master is protected
     steps:
       - name: Contribute List
-        uses: akhilmhdh/contributors-readme-action@098389139f2fabed92e52606268941dbff381edb # v2.3.6
+        uses: akhilmhdh/contributors-readme-action@83ea0b4f1ac928fbfe88b9e8460a932a528eb79f # v2.3.11
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

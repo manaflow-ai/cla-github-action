@@ -1,1 +1,14 @@
+# Routine changes default to the repository maintainer.
 * @lawrencecchen
+
+# Route security-sensitive action code, release metadata, dependencies, policy,
+# and CI to the designated security maintainers. Branch protection should
+# require code-owner approval for these paths.
+/.github/ @austinywang @azooz2003-bit
+/src/ @austinywang @azooz2003-bit
+/dist/ @austinywang @azooz2003-bit
+/action.yml @austinywang @azooz2003-bit
+/package.json @austinywang @azooz2003-bit
+/package-lock.json @austinywang @azooz2003-bit
+/SECURITY.md @austinywang @azooz2003-bit
+/CONTRIBUTING_SECURITY.md @austinywang @azooz2003-bit

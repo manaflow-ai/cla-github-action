@@ -5,6 +5,7 @@ You want to contribute to CLA Assistant? Welcome! Please read this document to u
  * [Analyze Issues](#analyze-issues)
  * [Report an Issue](#report-an-issue)
  * [Contribute Code](#contribute-code)
+ * [Secure Contribution Workflow](CONTRIBUTING_SECURITY.md)
 
 ## Help Others
 
@@ -78,6 +79,10 @@ Bug report analysis support is very welcome! (e.g. pre-analysis or proposing sol
 ## Contribute Code
 
 You are welcome to contribute code to CLA Assistant in order to fix bugs or to implement new features.
+
+Workflow files, action metadata, dependencies, and the generated `dist/` bundle
+can change the code and permissions used by GitHub Actions. Read the [Secure
+Contribution Workflow](CONTRIBUTING_SECURITY.md) before changing those files.
 
 There are three important things to know:
 
