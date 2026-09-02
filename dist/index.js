@@ -48497,7 +48497,7 @@ function readDataProperty(value, property) {
     return undefined;
 }
 function isObjectLike(value) {
-    return (typeof value === 'object' && value !== null) || typeof value === 'function';
+    return ((typeof value === 'object' && value !== null) || typeof value === 'function');
 }
 function validHttpStatus(value) {
     return typeof value === 'number' &&
