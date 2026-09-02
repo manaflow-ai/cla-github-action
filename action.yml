@@ -95,6 +95,14 @@ inputs:
       style contribution workflows).
     default: "true"
 outputs:
+  api_result:
+    description: >
+      Stable result for trusted downstream policy jobs. Values are 'success'
+      when validation completed without a policy failure, 'unsigned' when the
+      API completed but one or more contributors still need to sign,
+      'retryable_error' for a transport or transient GitHub API failure, and
+      'error' for validation, authorization, malformed-response, or permanent
+      API failures. The action still fails closed for both error values.
   cla_passed:
     description: >
       Set to 'true' only after the write-capable signer has confirmed that all

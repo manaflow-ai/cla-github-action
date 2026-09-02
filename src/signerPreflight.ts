@@ -19,6 +19,7 @@ import {
 } from './shared/committers'
 import { getPrSignComment } from './shared/pr-sign-comment'
 import { requireOpenerAsAuthor } from './shared/getInputs'
+import { setApiResult } from './shared/apiResult'
 
 type SignerDecision = 'authorized' | 'unauthorized' | 'error'
 
@@ -48,6 +49,7 @@ export async function runSignerPreflight(): Promise<void> {
     core.info(
       'The current Pull Request comment is not the configured exact signing declaration.'
     )
+    setApiResult('success')
     return
   }
 
@@ -85,6 +87,7 @@ export async function runSignerPreflight(): Promise<void> {
     !isPullRequestOpenerAllowlisted(livePullRequest.opener)
   ) {
     setSignerDecision('unauthorized')
+    setApiResult('error')
     core.setFailed(openerAuthorshipMismatchMessage(openerMismatch))
     return
   }
@@ -109,6 +112,7 @@ export async function runSignerPreflight(): Promise<void> {
 
   if (!authorized) {
     setSignerDecision('unauthorized')
+    setApiResult('error')
     core.setFailed(
       'The signing comment is not authored by an authenticated identity in the current Pull Request'
     )
@@ -123,6 +127,7 @@ export async function runSignerPreflight(): Promise<void> {
   core.setOutput('comment_created_at', canonicalComment.created_at)
   core.setOutput('comment_author_id', String(canonicalComment.user.id))
   setSignerDecision('authorized')
+  setApiResult('success')
 }
 
 interface EventComment {

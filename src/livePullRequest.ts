@@ -5,6 +5,7 @@ import {
   getExpectedHeadSha,
   getRequiredBaseRef
 } from './shared/getInputs'
+import { withGitHubApiError } from './shared/errors'
 
 export interface LivePullRequestSnapshot {
   headSha: string
@@ -37,11 +38,13 @@ export async function validateLivePullRequest(
   const repository = `${context.repo.owner}/${context.repo.repo}`
   const repositoryId = validateEvent(repository)
 
-  const response = await octokit.rest.pulls.get({
-    owner: context.repo.owner,
-    repo: context.repo.repo,
-    pull_number: context.issue.number
-  })
+  const response = await withGitHubApiError('pulls.get', () =>
+    octokit.rest.pulls.get({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      pull_number: context.issue.number
+    })
+  )
   const pullRequest = response.data
   const liveRepository = pullRequest.base.repo?.full_name
   const liveRepositoryId = pullRequest.base.repo?.id
@@ -184,11 +187,13 @@ export async function validateMergedPullRequestForLock(): Promise<void> {
     )
   }
 
-  const response = await octokit.rest.pulls.get({
-    owner: context.repo.owner,
-    repo: context.repo.repo,
-    pull_number: context.issue.number
-  })
+  const response = await withGitHubApiError('pulls.get', () =>
+    octokit.rest.pulls.get({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      pull_number: context.issue.number
+    })
+  )
   const pullRequest = response.data
   const requiredBaseRef = getRequiredBaseRef()
   const liveBaseRepository = pullRequest.base.repo

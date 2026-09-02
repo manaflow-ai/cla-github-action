@@ -1,7 +1,7 @@
 import { context } from '@actions/github'
 import { Committer } from './interfaces'
 import { octokit } from './octokit'
-import { errorMessage } from './shared/errors'
+import { errorMessage, withGitHubApiError } from './shared/errors'
 import {
   MAX_AUTHORS_PER_COMMIT,
   MAX_GIT_IDENTITY_ASSERTIONS,
@@ -155,12 +155,14 @@ export default async function getCommitters(
     const seenCursors = new Set<string>()
 
     while (hasNextPage) {
-      const response = (await octokit.graphql(COMMITS_QUERY, {
-        owner: context.repo.owner,
-        name: context.repo.repo,
-        number: context.issue.number,
-        cursor
-      })) as GraphQLResponse
+      const response = (await withGitHubApiError('graphql.committers', () =>
+        octokit.graphql(COMMITS_QUERY, {
+          owner: context.repo.owner,
+          name: context.repo.repo,
+          number: context.issue.number,
+          cursor
+        })
+      )) as GraphQLResponse
 
       const pullRequest = response?.repository?.pullRequest
       if (
@@ -251,7 +253,8 @@ export default async function getCommitters(
     return [...committers.values()]
   } catch (e) {
     throw new Error(
-      `GraphQL call to get commit identities failed: ${errorMessage(e)}`
+      `GraphQL call to get commit identities failed: ${errorMessage(e)}`,
+      { cause: e }
     )
   }
 }
