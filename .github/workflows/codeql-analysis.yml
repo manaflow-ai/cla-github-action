@@ -20,6 +20,8 @@ on:
   schedule:
     - cron: '40 10 * * 2'
 
+permissions: {}
+
 jobs:
   analyze:
     name: Analyze
@@ -27,7 +29,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      security-events: write
+      security-events: write # upload CodeQL results; no other write scope
 
     strategy:
       fail-fast: false
