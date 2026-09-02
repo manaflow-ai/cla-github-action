@@ -1,7 +1,7 @@
 * @lawrencecchen
 
 # CLA policy, its legal document, and the protected signature ledger require
-# review from both designated security maintainers.
+# code-owner review from at least one designated security maintainer.
 /.github/CODEOWNERS @austinywang @azooz2003-bit
 /.github/workflows/cla.yml @austinywang @azooz2003-bit
 /.github/scripts/ @austinywang @azooz2003-bit

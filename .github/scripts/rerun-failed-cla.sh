@@ -480,10 +480,11 @@ workflow_id="$(jq -r --arg path "${WORKFLOW_PATH}" '[.[] | .workflows[]? | selec
 # newest one. Every candidate is tied to the exact workflow path and event.
 # When GitHub includes pull_requests on a run, bind the candidate to the exact
 # PR object, including its source head and live base SHAs. GitHub can return an
-# empty array for pull_request_target runs. Those candidates are accepted only
-# when the run has complete source-repository metadata and its execution SHA is
-# the live PR base SHA. Missing metadata cannot identify which fork produced a
-# branch, so it is always rejected before any check is rerun.
+# empty array for pull_request_target runs. Those candidates are accepted when
+# their source repository metadata is complete; the exact run and live PR are
+# re-read below, and a non-base execution is additionally bound to its source
+# head check before any rerun. Missing metadata cannot identify which fork
+# produced a branch, so it is always rejected.
 runs_page="$(gh_api_bounded \
   --method GET \
   --header 'Accept: application/vnd.github+json' \
@@ -567,7 +568,6 @@ if ! candidate_list_json="$(jq -c \
         | if $prs == null then false
           elif ($prs | length > 100) then false
           elif ($prs | length) == 0 then
-            .head_sha == $base_sha and
             .head_branch == $head_ref and
             (.head_repository | type) == "object" and
             .head_repository.full_name == $head_repo and
@@ -617,12 +617,12 @@ if ! candidate_list_json="$(jq -c \
           )
       ]
       | sort_by([
+          .created_at,
+          .id,
           if ((.pull_requests | type) == "array" and (.pull_requests | length) > 0) then 3
           elif (.head_repository | type) == "object" and .head_sha == $base_sha then 2
-          elif .head_sha == $sha then 1
-          else 0 end,
-          .created_at,
-          .id
+          elif (.head_repository | type) == "object" then 1
+          else 0 end
         ])
     ' <<<"${runs_json}")"; then
   fail "Could not validate CLA workflow run data"
@@ -640,7 +640,7 @@ if [[ "${candidate_count}" == "0" ]]; then
   empty_execution_mismatch_count="$(jq -r \
     --arg path "${WORKFLOW_PATH}" \
     --arg event "${TARGET_EVENT}" \
-    --arg sha "${head_sha}" \
+    --arg sha "${base_sha}" \
     --arg workflow_id "${workflow_id}" \
     --arg head_repo "${head_repo}" \
     --argjson head_repo_id "${head_repo_id}" \
@@ -679,7 +679,7 @@ if [[ "${candidate_count}" == "0" ]]; then
     ] | length' <<<"${runs_json}")"
   [[ "${empty_execution_mismatch_count}" =~ ^[0-9]+$ ]] || fail "Could not count unbound CLA workflow runs"
   if (( empty_execution_mismatch_count > 0 )); then
-    fail "The workflow run has no pull request association with complete source metadata and an exact execution SHA"
+    fail "The workflow run has no pull request association with complete source metadata or an acceptable execution/source-head binding"
   fi
 
   # A populated association with an old base SHA is not an absent check. It is
@@ -776,7 +776,7 @@ if [[ "${candidate_count}" == "0" ]]; then
        | if $prs == null then false
          elif ($prs | length > 100) then false
          elif ($prs | length) == 0 then
-           .head_sha == $sha and
+           .head_sha == $base_sha and
            .head_branch == $head_ref and
            (.head_repository | type) == "object" and
            .head_repository.full_name == $head_repo and
@@ -830,7 +830,8 @@ if [[ "${candidate_count}" == "0" ]]; then
   echo "No failed CLA run exists for this pull request head"
   exit 0
 fi
-# candidate_list_json is sorted oldest-first above. The selected run
+# The candidate list is sorted oldest-first by creation time and run ID. A
+# binding-strength rank breaks an exact recency tie only. The selected run
 # is fully fetched and validated below before any state-changing API
 # call, so multiple historical failures do not create ambiguity.
 candidate_json="$(jq -c '.[-1]' <<<"${candidate_list_json}")"
@@ -1030,7 +1031,6 @@ validate_exact_run_payload() {
            else null end) as $prs
         | if $prs == null then false
           elif ($prs | length) == 0 then
-            .head_sha == $base_sha and
             .head_branch == $head_ref and
             (.head_repository | type) == "object" and
             .head_repository.full_name == $head_repo and

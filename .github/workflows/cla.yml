@@ -131,6 +131,7 @@ jobs:
         if: >-
           runner.environment == 'github-hosted' &&
           success() &&
+          steps.admission.outputs.admitted == 'true' &&
           github.event_name == 'issue_comment' &&
           github.event.comment.body == 'I have read the CLA Document v2.2 and I hereby sign the CLA'
         uses: manaflow-ai/cla-github-action@212a0f2dd659b24b48a30ba35966e06dc41736af
@@ -144,12 +145,13 @@ jobs:
           required-base-ref: "master"
           custom-pr-sign-comment: "I have read the CLA Document v2.2 and I hereby sign the CLA"
           require-opener-as-author: "true"
-          # Austin Wang (austinywang, GitHub ID 38676809) and Aziz (azooz2003-bit,
-          # GitHub ID 67667005) are the only automated maintainers exempt from
-          # the signature ledger. The action matches these authenticated IDs
-          # live, exempts their opener and commit identities, and permits an
-          # opener-authorship mismatch only for those IDs. Do not add names or
-          # logins, because commit metadata is forgeable.
+          # Austin Wang (austinywang, GitHub ID 38676809) and Aziz
+          # (azooz2003-bit, GitHub ID 67667005) are the only automated
+          # maintainers exempt from the signature ledger. The action resolves
+          # these IDs against the live opener, so that opener is legally
+          # exempt from a signature and the opener-authorship guard; their
+          # commit identities are exempt as well. Do not add names or logins,
+          # because commit metadata is forgeable.
           allowlist-ids: "38676809,67667005"
 
   # This is the only job with ledger and comment write permissions. It has no

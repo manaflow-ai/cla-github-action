@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       matrix:
@@ -45,3 +45,17 @@ jobs:
       run: npm run lint
     - name: Npm test
       run: npm test
+
+  cla-rerun-binding:
+    name: CLA rerun binding fixtures
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        persist-credentials: false
+    - name: Run CLA rerun binding fixtures
+      run: tests/test_cla_rerun_binding.sh
