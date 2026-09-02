@@ -14,7 +14,9 @@
 
 Streamline your workflow and let this GitHub Action (a lite version of [CLA Assistant](https://github.com/cla-assistant/cla-assistant)) handle the legal side of contributions to a repository for you. CLA assistant GitHub action enables contributors to sign CLAs from within a pull request. With this GitHub Action we could get rid of the need for a centrally managed database by **storing the contributor's signature data** in a decentralized way - **in the same repository's file system** or **in a remote repository** which can be even a private repository.
 
-The sample below is an advisory signer workflow. It records signatures and reports the CLA result, but an `issue_comment` run cannot replace a failed `pull_request_target` check on the Pull Request head. If branch protection requires this check, add a separate trusted exact-head worker that accepts only this action's `signature_recorded=true` output, authenticates the commenter, and binds the current Pull Request number, head SHA, base branch, and workflow before calling the Actions rerun API. Keep `actions: write` out of this signer job. Without that worker, leave the CLA check advisory.
+The sample below is an advisory signer workflow. It records signatures and reports the CLA result, but an `issue_comment` run cannot replace a failed `pull_request_target` check on the Pull Request head. `signature_recorded=true` means that this run persisted one new ledger entry. `cla_passed=true` means that the write-capable signer confirmed every required contributor and applied the final all-signed bot comment. If branch protection requires this check, add a separate trusted exact-head worker that authenticates the event, binds the current Pull Request number, head and base SHAs, comment tuple, workflow, and check before calling the Actions rerun API. Keep `actions: write` out of the signer job. Without that worker, leave the CLA check advisory.
+
+The example uses the v2.2 declaration `I have read the CLA Document v2.2 and I hereby sign the CLA`. The action's built-in declaration remains the legacy value for compatibility, so the sample sets `custom-pr-sign-comment` explicitly. Copy the configured phrase byte-for-byte into the read-only gate, the contributor-facing CLA document, and any trusted refresh worker.
 
 ### Features
 1. decentralized data storage
@@ -30,7 +32,7 @@ The sample below is an advisory signer workflow. It records signatures and repor
 #### 1. Add the following Workflow File to your repository in this path`.github/workflows/cla.yml`
 
 ```yml
-name: "CLA Assistant v2"
+name: "CLA Assistant v3"
 on:
   issue_comment:
     types: [created]
@@ -53,21 +55,27 @@ jobs:
       github.event.comment.user.id > 0 &&
       github.event.issue.state == 'open' && github.event.issue.pull_request &&
       (github.event.comment.body == 'recheck' ||
-      github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'))
+      github.event.comment.body == 'I have read the CLA Document v2.2 and I hereby sign the CLA'))
     name: "CLA Comment Gate"
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # GitHub-hosted only. Do not use self-hosted or mutable labels.
     timeout-minutes: 2
     permissions: {}
     concurrency:
       group: cla-admission-${{ github.repository }}-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: false
     steps:
+      - name: "Require GitHub-hosted runner"
+        if: runner.environment != 'github-hosted'
+        run: |
+          set -euo pipefail
+          echo "::error::CLA policy requires a GitHub-hosted runner"
+          exit 1
       - name: "Validate exact CLA comment"
         if: github.event_name == 'issue_comment'
         shell: bash
         env:
           COMMENT_BODY: ${{ github.event.comment.body }}
-          SIGN_PHRASE: I have read the CLA Document and I hereby sign the CLA
+          SIGN_PHRASE: I have read the CLA Document v2.2 and I hereby sign the CLA
         run: |
           if [[ "$COMMENT_BODY" != "recheck" && "$COMMENT_BODY" != "$SIGN_PHRASE" ]]; then
             echo "::error::Comment must match the recheck command or signing declaration exactly."
@@ -75,7 +83,7 @@ jobs:
           fi
 
   CLAAssistant:
-    name: "CLA Assistant v2"
+    name: "CLA Assistant v3"
     needs: CLACommentGate
     if: always() && needs.CLACommentGate.result == 'success'
     outputs:
@@ -83,7 +91,7 @@ jobs:
       # binds the current Pull Request, head SHA, base branch, and workflow.
       signature_recorded: ${{ steps.cla_action.outputs.signature_recorded }}
       cla_passed: ${{ steps.cla_action.outputs.cla_passed }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # GitHub-hosted only. Do not use self-hosted or mutable labels.
     timeout-minutes: 10
     permissions:
       contents: write # this can be read if signatures are in a remote repository
@@ -103,10 +111,17 @@ jobs:
       # arbitrary comments before this privileged queue.
       cancel-in-progress: false
     steps:
-      - name: "CLA Assistant v2"
+      - name: "Require GitHub-hosted runner"
+        if: runner.environment != 'github-hosted'
+        run: |
+          set -euo pipefail
+          echo "::error::CLA policy requires a GitHub-hosted runner"
+          exit 1
+      - name: "CLA Assistant v3"
         id: cla_action
-        # Pin to a full 40-character commit SHA, not a tag — see "Pinning by commit SHA" below.
-        uses: manaflow-ai/cla-github-action@fc608ba7106e7029d981d487d7bad28a64325956
+        if: runner.environment == 'github-hosted'
+        # Pin to the protected merged commit by its full 40-character SHA.
+        uses: manaflow-ai/cla-github-action@212a0f2dd659b24b48a30ba35966e06dc41736af
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Only set this token for a remote signature repository. Prefer a
@@ -119,6 +134,8 @@ jobs:
           # Initialize this branch, then restrict writes to trusted CLA automation.
           branch: 'cla-signatures'
           required-base-ref: 'main'
+          # Keep this exact phrase synchronized with CLACommentGate and CLA.md.
+          custom-pr-sign-comment: 'I have read the CLA Document v2.2 and I hereby sign the CLA'
           require-opener-as-author: 'true'
           # Add allowlist-ids only for a documented automated PR opener, using
           # that opener's numeric GitHub account ID. Never allowlist a name or
@@ -130,7 +147,8 @@ jobs:
           #create-file-commit-message: 'For example: Creating file for storing CLA Signatures'
           #signed-commit-message: 'For example: $contributorName has signed the CLA in $owner/$repo#$pullRequestNo'
           #custom-notsigned-prcomment: 'pull request comment with Introductory message to ask new contributors to sign'
-          #custom-pr-sign-comment: 'The signature to be committed in order to sign the CLA'
+          # The configured v2.2 declaration is set above. Keep this placeholder
+          # synchronized if you choose a different phrase.
           # If set, replace the default declaration in the job `if` guard with this exact text.
           #custom-allsigned-prcomment: 'pull request comment when all contributors has signed, defaults to **CLA Assistant Lite bot** All Contributors have signed the CLA.'
           #lock-pullrequest-aftermerge: false - if you don't want this bot to automatically lock the pull request after merging (default - true)
@@ -139,9 +157,11 @@ jobs:
 
 ```
 
+`CLA Assistant v3` is the workflow, job, and check label chosen by the consuming repository. It is not selected by an action input. Keep this label stable after adding it to branch protection, because changing it creates a different check context.
+
 Replace `<REPLACE_WITH_CLA_URL>` with the non-empty absolute HTTPS URL of the CLA or DCO. The action rejects an empty, relative, or non-HTTPS value before it makes a GitHub write.
 
-The `CLACommentGate` job admits the listed `pull_request_target` lifecycle actions and filtered new `issue_comment` events from a GitHub `User` with a positive account ID. It has no write permission. Its bounded concurrency group separates each repository, event class, and Pull Request. Its `if` guard filters most comments, but GitHub expression equality is case-insensitive. The shell step runs for comments and is the authority for the required case-sensitive comparison. The advisory `CLAAssistant` signer requires gate success for both event classes and enters its own signer concurrency group only after the gate succeeds. A required-check deployment also needs the separate trusted exact-head worker described above. If you set `custom-pr-sign-comment`, replace the default declaration in the gate `if` guard and `SIGN_PHRASE` with that custom text. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the signer job to run for every issue comment.
+The `CLACommentGate` job admits the listed `pull_request_target` lifecycle actions and filtered new `issue_comment` events from a GitHub `User` with a positive account ID. It has no write permission. Its bounded concurrency group separates each repository, event class, and Pull Request. Its `if` guard filters most comments, but GitHub expression equality is case-insensitive. The shell step runs for comments and is the authority for the required case-sensitive comparison. The advisory `CLAAssistant` signer requires gate success for both event classes and enters its own signer concurrency group only after the gate succeeds. A required-check deployment also needs the separate trusted exact-head worker described above. If you set `custom-pr-sign-comment`, replace the declaration in the gate `if` guard and `SIGN_PHRASE` with that custom text, byte-for-byte. If you set `use-dco-flag: true`, replace both with `I have read the DCO Document and I hereby sign the DCO`. Keep `recheck` as the separate exact alternative. Do not broaden the signer job to run for every issue comment.
 
 GitHub workflow event admission cannot compare a comment body case-sensitively. The unprivileged gate must start a runner to reject a case variant. GitHub keeps only one pending run in each concurrency group, so a same-PR case variant can replace one pending gate run before the exact shell check. It cannot enter the privileged signer queue. The contributor must post the exact comment again when this occurs. A high-volume public repository needs a trusted webhook or GitHub App classifier, or an external rate limit, when this fairness or runner-resource denial-of-service risk is material.
 
@@ -149,11 +169,19 @@ The shell step and the action compare the raw comment body and do not trim white
 
 This version accepts signing and `recheck` only on newly created comments. A declaration comment must have matching GitHub creation and update timestamps. A comment edited into the declaration stays invalid on a later `recheck`. The workflow does not trigger on `issue_comment` `edited` events. The `pull_request_target` `edited` and `ready_for_review` lifecycle events are admitted for the action's live validation. Do not add an issue-comment `edited` trigger unless a later action version validates the edited event and the exact updated declaration at runtime.
 
-The sample lets any authenticated human Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head SHA, workflow file, and base branch. The signer sample remains advisory until that worker is installed.
+The sample lets any authenticated human Pull Request commenter use `recheck` only to refresh this action. Do not reuse that condition for a job with `actions: write` or another privileged queue operation. A separate rerun worker must authenticate the commenter, then bind the request to the current Pull Request number, head and base SHAs, base branch, workflow file, exact check name and app, and current failed run before calling the Actions rerun API. The signer sample remains advisory until that worker is installed.
 
-The action exposes `signature_recorded=true` only after it persists a new signature. The sample gives the action step an ID and publishes this as `needs.CLAAssistant.outputs.signature_recorded` for a trusted later job in the same workflow. That rerun job may use the output only after it binds the exact failed check to the current Pull Request number, head SHA, base branch, and workflow. A separate workflow cannot consume a job output directly and needs an authenticated handoff. Do not authorize a rerun from an arbitrary signing comment when this output is false.
+The action exposes `signature_recorded=true` only after it persists a new signature. The sample gives the action step an ID and publishes this as `needs.CLAAssistant.outputs.signature_recorded` for a trusted later job in the same workflow. Treat that output as a trigger hint, never as proof that the required check passed. The rerun job may use it only after it binds the exact failed check to the current Pull Request number, head and base SHAs, workflow, check name and app, and authenticated comment tuple. A separate workflow cannot consume a job output directly and needs an authenticated handoff. Do not authorize a rerun from an arbitrary signing comment when this output is false.
 
 The action exposes `cla_passed=true` only after the write-capable signer has confirmed that every required contributor is signed and successfully applied the final all-signed CLA bot comment. It remains `false` for signer-preflight, unsigned, closed, and error runs. `signature_recorded=true` only means that this run persisted one new signature, so it can be true while `cla_passed` remains false for another unsigned contributor. `cla_passed` is a per-run result, not durable authorization; consumers must also require the writer job to succeed.
+
+#### Required checks, reruns, and runner isolation
+
+Require a stable check produced by a trusted `pull_request_target` workflow and verify that it is bound to the live Pull Request and head SHA. An `issue_comment` run has no Pull Request head check context and cannot repair a failed required check by itself. Keep the gate and `signer-preflight` read-only. Give the write-capable signer only the `contents: write`, `issues: write`, and `pull-requests: write` scopes it needs, and require both its successful job conclusion and `cla_passed == 'true'` before treating the CLA policy as passed. Configure branch protection only after a canary confirms that the exact check name is produced on opened and synchronized Pull Requests. See GitHub's [required status check guidance](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging).
+
+If a signing comment must refresh a required check, use a separate trusted worker with `actions: write`. It must re-fetch and bind the Pull Request number, current head and base SHAs, base branch, exact comment ID, creation time, author ID, workflow path, check name and app, and failed run before calling the [workflow rerun API](https://docs.github.com/en/rest/actions/workflow-runs#rerun-a-job-from-a-workflow-run). Bound the number of reruns and fail closed on any mismatch. Do not give `actions: write` to the gate or signer, and do not pass `secrets: inherit` to a reusable workflow. A failed API request stays failed; an operator can post a new exact `recheck` comment after recovery.
+
+Run every CLA job on a fixed GitHub-hosted label, such as `ubuntu-24.04`, and add a first step that fails when `runner.environment != 'github-hosted'`. Do not use `self-hosted`, `macOS`, `ARM64`, or a mutable runner variable for these jobs. Do not check out or execute the contributor's Pull Request branch. A self-hosted or contributor-controlled runner can read a write token before a later step is skipped. See GitHub's [security hardening guidance for GitHub-hosted runners](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions).
 
 For a least-privilege admission gate, run the action with `mode: signer-preflight` in a separate job that has only `contents: read`, `pull-requests: read`, and `issues: read`. The GraphQL commit identity connection requires `contents: read` in private repositories. The mode re-fetches the live Pull Request, resolves the current author/co-author/committer identities through the same bounded GraphQL query as the signer, and verifies the event comment against the canonical unedited comment. It sets `signer_authorized=true` only for a matching account ID and emits the validated head and base commits as `head_sha` and `base_sha`. It also emits `comment_id`, `comment_created_at`, and `comment_author_id` for the exact declaration it authenticated. Pass those three outputs to the writer's `expected-comment-id`, `expected-comment-created-at`, and `expected-comment-author-id` inputs. The writer re-fetches that exact comment before every ledger or Pull Request comment write and accepts no replacement declaration. Inspect `signer_decision` to distinguish `authorized`, an exact declaration accepted by identity policy, from `unauthorized`, an exact declaration rejected by identity policy, and `error`, a validation or GitHub request failure. The action fails the job for both non-authorized decisions. Run the write-capable signer only when `signer_authorized` is `'true'`. Pass both SHA outputs to its `expected-head-sha` and `expected-base-sha` inputs. The writer compares all five values with the live Pull Request and comment before any ledger or comment write and on every later revalidation, so a force-push, base-branch advance, edited comment, or replacement comment fails closed. The write-capable signer must still perform its own live validation after the gate because preflight outputs are ephemeral admission results, not durable authorization tokens.
 
@@ -197,7 +225,7 @@ The action re-fetches accepted signing comments immediately before a ledger writ
 > reference as a trailing comment so future readers know what they're looking at:
 >
 > ```yaml
-> uses: manaflow-ai/cla-github-action@91ce707cb678fe377c6788ecbf8470fa6205a969
+> uses: manaflow-ai/cla-github-action@212a0f2dd659b24b48a30ba35966e06dc41736af # protected master commit
 > ```
 >
 > Use a protected merged commit or release for enforcement. Do not pin an
@@ -228,10 +256,10 @@ The action fails closed when a Pull Request has more than 1,000 commits, more th
 
 #### 3. Signing the CLA
 
-CLA workflow creates a comment on Pull Request asking contributors who have not signed the CLA to sign and fails the `CLA Assistant` GitHub Actions job. Contributors must post a new comment with **"I have read the CLA Document and I hereby sign the CLA"** as the full raw Pull Request comment body. Leading or trailing whitespace, blank lines, case changes, wording changes, punctuation, and internal whitespace changes do not count. An edited `issue_comment` does not trigger the workflow, and an edited declaration remains invalid. Put `recheck` in a separate new comment. Only a comment author that GitHub identifies as a `User` with a positive numeric account ID can sign. Bot, organization, mannequin, missing-type, and invalid-ID actors fail closed.
+CLA workflow creates a comment on Pull Request asking contributors who have not signed the CLA to sign and fails the `CLA Assistant` GitHub Actions job. In this sample, contributors must post a new comment with **"I have read the CLA Document v2.2 and I hereby sign the CLA"** as the full raw Pull Request comment body. Leading or trailing whitespace, blank lines, case changes, wording changes, punctuation, and internal whitespace changes do not count. An edited `issue_comment` does not trigger the workflow, and an edited declaration remains invalid. Put `recheck` in a separate new comment. Only a comment author that GitHub identifies as a `User` with a positive numeric account ID can sign. Bot, organization, mannequin, missing-type, and invalid-ID actors fail closed. If you omit `custom-pr-sign-comment`, the action keeps its legacy compatibility declaration. Choose one declaration and use it identically in the gate, action input, and CLA document.
 If the contributor has already signed the CLA, the `CLA Assistant` job succeeds. The GitHub Actions runner publishes that job as the Pull Request check; this action does not create a separate commit status or check run. <br/>
 
-This action does not rerun an earlier workflow after it records a signature. Repositories that need an immediate required-check update must use a separate trusted job. That job must authenticate the exact signing event, bind the rerun to the current Pull Request number, head commit SHA, workflow file, and base branch, and then call the Actions rerun API. The sample signer has no `actions: write` permission and is advisory for `issue_comment` runs by design.
+This action does not rerun an earlier workflow after it records a signature. Repositories that need an immediate required-check update must use a separate trusted job. That job must authenticate the exact signing event, bind the rerun to the current Pull Request number, head and base SHAs, base branch, workflow file, exact check name and app, comment tuple, and failed run, and then call the Actions rerun API. The sample signer has no `actions: write` permission and is advisory for `issue_comment` runs by design.
 
 The action does not automatically retry GitHub API requests. A transient GitHub failure fails the current run, which can then be rerun after GitHub recovers. This avoids duplicate comments or ledger writes when GitHub completed a state change but its response was lost.
 
@@ -305,7 +333,7 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
 | `create-file-commit-message`   | _optional_ |Commit message when a new CLA file is created. | Creating file for storing CLA Signatures. |
 | `signed-commit-message`   | _optional_ | Commit message when a new contributor signs the CLA in a Pull Request. |  $contributorName has signed the CLA in $pullRequestNo |
 | `custom-notsigned-prcomment`   | _optional_ | Introductory Pull Request comment to ask new contributors to sign. | Thank you for your contribution and please kindly read and sign our $pathToCLADocument |
-| `custom-pr-sign-comment`   | _optional_ | The signature to be committed in order to sign the CLA. | I have read the Developer Terms Document and I hereby accept the Terms |
+| `custom-pr-sign-comment`   | _optional_ | The exact full comment body to record as a signature. Keep it byte-for-byte identical to the gate and CLA document. | I have read the CLA Document v2.2 and I hereby sign the CLA |
 | `custom-allsigned-prcomment`   | _optional_ | pull request comment when everyone has signed | All Contributors have signed the CLA. |
 | `lock-pullrequest-aftermerge`   | _optional_ | Boolean input for locking the pull request after merging. Default is set to `true`.  It is highly recommended to lock the Pull Request after merging so that the Contributors won't be able to revoke their signature comments after merge | false |
 | `suggest-recheck`   | _optional_ | Boolean input for indicating if the action's comment should suggest that users comment `recheck`. Default is set to `true`. | false |
