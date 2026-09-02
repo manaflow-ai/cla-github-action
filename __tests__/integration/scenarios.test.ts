@@ -479,6 +479,49 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('keeps a non-opener co-author in the legal signer set', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    setInput('allowlist-ids', '2002')
+    repository.addPullRequest({
+      number: 32,
+      head: { sha: 'headsha', ref: 'feature/coauthor-allowlist' },
+      user: { login: 'alice', id: 1001 },
+      commits: [
+        {
+          author: { login: 'alice', id: 1001 },
+          coAuthors: [{ login: 'bob', id: 2002 }]
+        }
+      ]
+    })
+    repository.setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 32,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'opened',
+        pull_request: { number: 32, state: 'open' },
+        repository: { id: repository.state.id }
+      }
+    })
+
+    await runAction()
+
+    expect(watch.failures.join('\n')).toMatch(/have to sign the CLA/i)
+    expect(repository.listComments(32)[0]?.body).toContain(
+      ':x: [bob](https://github.com/bob)'
+    )
+    expect(repository.getFile('signatures/cla.json')).toEqual({
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    watch.restore()
+  })
+
   it('does not fail an authenticated allowlisted opener mismatch in writer mode', async () => {
     const watch = watchCore()
     const repository = fake.repo('acme', 'widgets')
