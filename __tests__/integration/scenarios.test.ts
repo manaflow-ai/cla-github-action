@@ -2142,6 +2142,47 @@ describe('CLA action end-to-end scenarios', () => {
     watch.restore()
   })
 
+  it('accepts a pull_request_target payload whose base SHA is stale', async () => {
+    const watch = watchCore()
+    const repository = fake.repo('acme', 'widgets')
+    repository.addPullRequest({
+      number: 30,
+      head: { sha: 'headsha', ref: 'feature/stale-base' },
+      user: { login: 'alice', id: 1001 },
+      commits: [{ author: { login: 'alice', id: 1001 } }]
+    })
+    repository.setFile('signatures/cla.json', {
+      signedContributors: [{ name: 'alice', id: 1001 }]
+    })
+    const repo = { full_name: 'acme/widgets', id: repository.state.id }
+    setContext({
+      owner: 'acme',
+      repo: 'widgets',
+      issueNumber: 30,
+      actor: 'alice',
+      eventName: 'pull_request_target',
+      payload: {
+        action: 'reopened',
+        pull_request: {
+          number: 30,
+          state: 'open',
+          user: { login: 'alice', id: 1001 },
+          head: { sha: 'headsha', ref: 'feature/test', repo },
+          // GitHub advanced main after this event was queued, so the live
+          // base SHA is 'base-sha' while the payload still carries the old tip.
+          base: { ref: 'main', sha: 'base-tip-before-main-advanced', repo }
+        },
+        repository: { id: repository.state.id }
+      }
+    })
+    await runAction()
+    expect(watch.failures).toEqual([])
+    expect(repository.listComments(30)[0]!.body).toMatch(
+      /all contributors have signed the cla/i
+    )
+    watch.restore()
+  })
+
   it('rejects a pull_request_target payload with a different head repository identity', async () => {
     const watch = watchCore()
     fake.repo('acme', 'widgets').addPullRequest({

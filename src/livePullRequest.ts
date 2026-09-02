@@ -304,8 +304,11 @@ function validatePayloadAgainstLive(
       live.headRepository.toLowerCase() ||
     pullRequest.head.repo?.id !== live.headRepositoryId ||
     pullRequest.base?.ref !== live.baseRef ||
-    (pullRequest.base?.sha !== undefined &&
-      pullRequest.base.sha !== live.baseSha) ||
+    // The payload base SHA is not compared. It is the base branch tip that
+    // GitHub recorded on the pull request when the event was queued, and
+    // GitHub refreshes it whenever the base branch advances, so a reopened
+    // or edited pull request on a busy repository routinely carries a stale
+    // value. The head SHA, refs, and repository IDs identify the pull request.
     pullRequest.base.repo?.full_name?.toLowerCase() !==
       repository.toLowerCase() ||
     pullRequest.base.repo?.id !== live.baseRepositoryId
