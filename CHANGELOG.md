@@ -144,6 +144,15 @@ commit that introduced it.
   `recheck`; it cannot cause an unbounded runner loop or discard a committed
   signature.
 
+### Documentation
+
+- Updated the workflow example to pin the protected
+  `212a0f2dd659b24b48a30ba35966e06dc41736af` action commit,
+  use the v2.2 declaration, and keep the workflow, gate, and CLA document text
+  synchronized.
+- Added required-check, bounded rerun, least-privilege, and GitHub-hosted runner
+  guidance for public repositories.
+
 ### Changed
 
 - Updated the production Actions toolkit to `@actions/core` 3.0.1 and
