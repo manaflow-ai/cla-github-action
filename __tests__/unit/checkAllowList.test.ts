@@ -2,7 +2,6 @@ import * as core from '@actions/core'
 import { resetEnv, setInput } from '../testHelpers/env'
 import {
   checkAllowList,
-  checkExemptOpener,
   isPullRequestOpenerAllowlisted
 } from '../../src/checkAllowList'
 import { Committer } from '../../src/interfaces'
@@ -28,14 +27,14 @@ describe('checkAllowList', () => {
     resetEnv()
   })
 
-  it('does not remove contributors for an opener-authorship allowlist', () => {
+  it('exempts only the authenticated live opener with a configured ID', () => {
     setInput('allowlist-ids', '1001, 2002')
     const result = checkAllowList([
       committer('alice', 1001, undefined, true),
       committer('bob', 2002),
       committer('carol', 3003)
     ])
-    expect(result.map(c => c.name)).toEqual(['alice', 'bob', 'carol'])
+    expect(result.map(c => c.name)).toEqual(['bob', 'carol'])
   })
 
   it('does not exempt a matching raw login or email from the deprecated allowlist', () => {
@@ -61,7 +60,7 @@ describe('checkAllowList', () => {
       committer('bob', 2002)
     ])
 
-    expect(result.map(c => c.name)).toEqual(['alice', 'bob'])
+    expect(result.map(c => c.name)).toEqual(['bob'])
     expect(warning).toHaveBeenCalledWith(
       expect.stringMatching(/invalid allowlist-ids/i)
     )
@@ -78,41 +77,6 @@ describe('checkAllowList', () => {
     setInput('allowlist-ids', '')
     const committers = [committer('alice', 1001), committer('bob', 2002)]
     expect(checkAllowList(committers)).toEqual(committers)
-  })
-
-  it('removes only the exact live opener for an authenticated legal exemption', () => {
-    setInput('exempt-opener-ids', '1001, 2002')
-    const result = checkExemptOpener(
-      [
-        committer('alice', 1001, undefined, true),
-        committer('bob', 2002),
-        committer('carol', 3003, undefined, true)
-      ],
-      { id: 1001 }
-    )
-    expect(result.map(c => c.name)).toEqual(['bob', 'carol'])
-  })
-
-  it('does not remove a commit-derived identity that only matches the configured ID', () => {
-    setInput('exempt-opener-ids', '1001')
-    const result = checkExemptOpener(
-      [committer('forged-alice', 1001), committer('bob', 2002)],
-      { id: 1001 }
-    )
-    expect(result.map(c => c.name)).toEqual(['forged-alice', 'bob'])
-  })
-
-  it('ignores malformed legal exemption IDs and never exempts an invalid opener', () => {
-    const warning = jest.spyOn(core, 'warning').mockImplementation(() => {})
-    setInput('exempt-opener-ids', '1001,bob,0,-2,3.5,9007199254740992')
-    const committers = [committer('alice', 1001, undefined, true)]
-
-    expect(checkExemptOpener(committers, { id: Number.NaN })).toEqual(
-      committers
-    )
-    expect(warning).toHaveBeenCalledWith(
-      expect.stringMatching(/invalid exempt-opener-ids/i)
-    )
   })
 
   it('matches only a configured authenticated opener ID', () => {

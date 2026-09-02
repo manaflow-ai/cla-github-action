@@ -48178,12 +48178,13 @@ function parsePositiveSafeInteger(value) {
  * Exempt only the identity authenticated by the live Pull Request API as the
  * opener, and only when its database ID is explicitly configured. GitHub may
  * map forgeable commit emails to account IDs, so a commit-derived ID alone is
- * never enough for an exemption.
+ * never enough for an exemption. The authenticated opener exemption covers
+ * both the legal signature ledger and the opener-authorship guard.
  */
 function checkAllowList(committers) {
     const legacy = getAllowListItem().trim();
     if (legacy) {
-        warning("The deprecated 'allowlist' input is ignored because names, emails, and globs can be spoofed in commit metadata. Use 'allowlist-ids' only for authenticated Pull Request opener IDs.");
+        warning("The deprecated 'allowlist' input is ignored because names, emails, and globs can be spoofed in commit metadata. Use 'allowlist-ids' only for an authenticated Pull Request opener ID.");
     }
     const { ids, invalid } = parseAllowListIds(getAllowListIds());
     if (invalid.length > 0) {

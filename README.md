@@ -265,7 +265,7 @@ and `remote-repository-name`: `<your repo name>` in your CLA workflow file.
 
 #### 5. Authenticated opener ID allowlist
 
-Use `allowlist-ids` only when a specific automated Pull Request opener must be exempt. Values are comma-separated numeric GitHub database IDs. The action applies an exemption only when the live Pull Request API authenticates that ID as the opener, and then bypasses only the opener-authorship hard-fail. It never exempts an author, co-author, or committer derived only from git metadata. The deprecated `allowlist` name, email, and glob input is ignored because commit metadata can spoof those values.
+Use `allowlist-ids` only when a specific automated Pull Request opener must be exempt from the CLA signature ledger and the opener-authorship guard. Values are comma-separated numeric GitHub database IDs. The action applies an exemption only when the live Pull Request API authenticates that ID as the opener. It never exempts an author, co-author, or committer derived only from git metadata. The deprecated `allowlist` name, email, and glob input is ignored because commit metadata can spoof those values.
 
 ##### Demo for step 5
 
@@ -301,7 +301,7 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
 | `expected-comment-id`   | _optional_  | REST ID of the exact signing comment emitted by `signer-preflight`. Set this together with the creation timestamp and author ID to prevent a writer from accepting another exact declaration on the same Pull Request. | `${{ steps.preflight.outputs.comment_id }}` |
 | `expected-comment-created-at`   | _optional_  | Exact creation timestamp emitted by `signer-preflight` for the authenticated signing comment. Required when `expected-comment-id` is set. | `${{ steps.preflight.outputs.comment_created_at }}` |
 | `expected-comment-author-id`   | _optional_  | Numeric GitHub account ID emitted by `signer-preflight` for the authenticated signing comment. Required when `expected-comment-id` is set. | `${{ steps.preflight.outputs.comment_author_id }}` |
-| `allowlist-ids`   | _optional_ | Comma-separated numeric GitHub user IDs. Only the authenticated live Pull Request opener can be exempt. Commit-derived identities are never exempt. | Leave empty unless a documented automated opener was reviewed. |
+| `allowlist-ids`   | _optional_ | Comma-separated numeric GitHub user IDs. Only the authenticated live Pull Request opener can be exempt from the CLA signature ledger and opener-authorship guard. Commit-derived identities are never exempt. | Leave empty unless a documented automated opener was reviewed. |
 | `allowlist`   | _deprecated_ | Ignored. Raw names, emails, and globs are unsafe identity evidence. | |
 | `remote-repository-name`   | _optional_ | provide the remote repository name where all the signatures should be stored . | remote repository name |
 | `remote-organization-name`   | _optional_ | provide the remote organization name where all the signatures should be stored. | remote organization name |

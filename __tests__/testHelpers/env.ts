@@ -36,7 +36,6 @@ export function setDefaultInputs(
     'expected-comment-author-id': '',
     allowlist: '',
     'allowlist-ids': '',
-    'exempt-opener-ids': '',
     'remote-organization-name': '',
     'remote-repository-name': '',
     'create-file-commit-message': 'Creating file for storing CLA Signatures',
