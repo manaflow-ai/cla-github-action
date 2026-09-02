@@ -102,7 +102,9 @@ outputs:
       API completed but one or more contributors still need to sign,
       'retryable_error' for a transport or transient GitHub API failure, and
       'error' for validation, authorization, malformed-response, or permanent
-      API failures. The action still fails closed for both error values.
+      API failures. Unknown status-less failures are terminal 'error' values.
+      Diagnostic text is bounded and redacts URLs, credentials, headers, and
+      request options. The action still fails closed for both error values.
   cla_passed:
     description: >
       Set to 'true' only after the write-capable signer has confirmed that all
