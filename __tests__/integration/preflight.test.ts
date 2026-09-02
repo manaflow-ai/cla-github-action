@@ -329,7 +329,7 @@ describe('signer-preflight mode', () => {
     ['co-author', [{ login: 'alice', id: 1001 }], [{ login: 'bob', id: 2002 }]],
     ['committer', [{ login: 'alice', id: 1001 }], undefined]
   ] as const)(
-    'authorizes a current %s identity by numeric GitHub ID',
+    'does not admit a %s identity that is not a required signer',
     async (_role, authors, coAuthors) => {
       const watch = watchCore()
       const commits = [
@@ -352,9 +352,13 @@ describe('signer-preflight mode', () => {
 
       await runAction()
 
-      expect(watch.outputs).toContainEqual(['signer_authorized', true])
-      expect(watch.outputs).toContainEqual(['signer_decision', 'authorized'])
-      expect(watch.failures).toEqual([])
+      // Co-authors and git committers never need to sign, so a declaration
+      // from one of them is not an admission of anything.
+      expect(watch.outputs).toContainEqual(['signer_authorized', false])
+      expect(watch.outputs).toContainEqual(['signer_decision', 'unauthorized'])
+      expect(watch.failures.join('\n')).toMatch(
+        /not authored by an authenticated identity/i
+      )
       expect(writeRequests()).toEqual([])
       watch.restore()
     }

@@ -11,6 +11,16 @@ interface OpenerAuthorshipMismatch {
 }
 
 /**
+ * Reduce commit identities to the ones that must sign: primary commit
+ * authors. Co-authored-by trailers are unverified text that commonly names
+ * pairing partners and AI coding agents; they satisfy the opener authorship
+ * guard but never create a signing obligation of their own.
+ */
+export function requiredSigners(commitAuthors: Committer[]): Committer[] {
+  return commitAuthors.filter(committer => committer.isPrimaryAuthor)
+}
+
+/**
  * Include the authenticated Pull Request opener as a contributor when the
  * opener is not present in git metadata. Git author and committer fields are
  * assertions, so the live Pull Request identity must remain a separate
@@ -40,8 +50,7 @@ export function includePullRequestOpener(
 /**
  * Return an authenticated opener mismatch when no primary-author or
  * co-author identity in the current commit set has the opener's account ID.
- * Committer-only matches do not qualify because the committer field is still
- * attacker-controlled git metadata.
+ * The git committer field is never collected, so it cannot qualify.
  */
 export function findOpenerAuthorshipMismatch(
   commitAuthors: Committer[],

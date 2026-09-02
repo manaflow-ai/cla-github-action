@@ -27,14 +27,14 @@ describe('checkAllowList', () => {
     resetEnv()
   })
 
-  it('exempts only the authenticated live opener with a configured ID', () => {
+  it('exempts every identity with a configured ID, opener or commit author', () => {
     setInput('allowlist-ids', '1001, 2002')
     const result = checkAllowList([
       committer('alice', 1001, undefined, true),
       committer('bob', 2002),
       committer('carol', 3003)
     ])
-    expect(result.map(c => c.name)).toEqual(['bob', 'carol'])
+    expect(result.map(c => c.name)).toEqual(['carol'])
   })
 
   it('does not exempt a matching raw login or email from the deprecated allowlist', () => {

@@ -52,7 +52,6 @@ describe('commentContent (CLA mode)', () => {
             name: 'mapped-account',
             id: 1234,
             pullRequestNo: 7,
-            requiresCurrentSignature: true,
             isPrimaryAuthor: true
           },
           {

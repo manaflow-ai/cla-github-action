@@ -7,7 +7,7 @@ export const MAX_PULL_REQUEST_COMMITS = 1000
 // committer assertion too.
 export const MAX_AUTHORS_PER_COMMIT = 100
 export const MAX_GIT_IDENTITY_ASSERTIONS =
-  MAX_PULL_REQUEST_COMMITS * (MAX_AUTHORS_PER_COMMIT + 1)
+  MAX_PULL_REQUEST_COMMITS * MAX_AUTHORS_PER_COMMIT
 export const MAX_PULL_REQUEST_COMMENTS = 1000
 // Bound contributor-controlled comment bodies before the action retains a
 // complete paginated history. Counts use UTF-8 bytes, not JavaScript code

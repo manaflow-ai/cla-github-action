@@ -7,19 +7,15 @@ export interface Committer {
   id: number
   pullRequestNo?: number | undefined
   /**
-   * True for identities that come from git author, co-author, or committer
-   * metadata. GitHub can map these fields to an account by email, but that
-   * does not authenticate who made the commit. A stored signature from
-   * another PR must not satisfy this identity unless the same account is the
-   * authenticated live PR opener.
+   * GitHub returned this identity as the primary author of a commit. Primary
+   * authors are the only commit-derived identities that must sign.
    */
-  requiresCurrentSignature?: boolean | undefined
-  /** GitHub returned this identity as the primary author of a commit. */
   isPrimaryAuthor?: boolean | undefined
-  /** GitHub returned this identity from a Co-authored-by trailer. */
+  /**
+   * GitHub returned this identity from a Co-authored-by trailer. Co-authors
+   * satisfy the opener authorship guard but are never required to sign.
+   */
   isCoAuthor?: boolean | undefined
-  /** GitHub returned this identity as the git committer of a commit. */
-  isCommitter?: boolean | undefined
   /** The live Pull Request API authenticated this identity as the opener. */
   isPullRequestOpener?: boolean | undefined
   /**

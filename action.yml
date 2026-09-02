@@ -56,7 +56,7 @@ inputs:
     description: "Deprecated and ignored. Raw names, emails, and globs can be spoofed in commit metadata."
     default: ""
   allowlist-ids:
-    description: "Comma-separated numeric GitHub user IDs. An ID is exempt only when the live Pull Request API authenticates it as the opener. Commit-derived identities are never exempt."
+    description: "Comma-separated numeric GitHub user IDs that never need to sign, as the Pull Request opener or as a commit author. Unlinked identities cannot match."
     default: ""
   remote-repository-name:
     description: "provide the remote repository name where all the signatures should be stored"
@@ -105,7 +105,7 @@ outputs:
     description: >
       Set to 'true' only when signer-preflight mode verifies that the current
       exact, unedited signing comment belongs to an authenticated identity in
-      the live Pull Request's author, co-author, committer, or opener set.
+      the live Pull Request's primary author or opener set.
       This output is an admission result, not a replacement for the normal
       write-capable action's live revalidation.
   signer_decision:

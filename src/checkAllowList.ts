@@ -3,10 +3,11 @@ import { Committer } from './interfaces'
 import * as input from './shared/getInputs'
 
 /**
- * Exempt only the identity authenticated by the live Pull Request API as the
- * opener, and only when its database ID is explicitly configured. GitHub may
- * map forgeable commit emails to account IDs, so a commit-derived ID alone is
- * never enough for an exemption.
+ * Exempt every identity whose GitHub database ID is explicitly configured,
+ * whether it is the authenticated opener or a commit author. Configured IDs
+ * are maintainers whose contributions are already covered, so a commit that
+ * GitHub attributes to one of them needs no signature in any Pull Request.
+ * Unlinked identities (id 0) can never match.
  */
 export function checkAllowList(committers: Committer[]): Committer[] {
   const legacy = input.getAllowListItem().trim()
@@ -24,15 +25,13 @@ export function checkAllowList(committers: Committer[]): Committer[] {
   }
 
   return committers.filter(
-    committer =>
-      committer &&
-      !(committer.isPullRequestOpener && isAllowlistedId(committer.id, ids))
+    committer => committer && !isAllowlistedId(committer.id, ids)
   )
 }
 
 /**
  * Check an authenticated live Pull Request opener against the numeric ID
- * allowlist. Commit-derived identities must never be passed as the opener.
+ * allowlist. This decides whether the opener authorship guard may hard-fail.
  * Invalid configuration is ignored here; the normal filtering path reports
  * configuration warnings before it removes any contributor.
  */
