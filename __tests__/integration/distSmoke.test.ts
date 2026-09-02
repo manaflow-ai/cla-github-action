@@ -198,6 +198,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
       /::error::.*Committers of Pull Request number 7/
     )
     expect(result.stdout).toMatch(/::set-output name=cla_passed::false/)
+    expect(result.stdout).toMatch(/::set-output name=api_result::unsigned/)
     expect(result.code).toBe(1)
 
     const comments = fake.repo('acme', 'widgets').listComments(7)
@@ -246,6 +247,7 @@ describe('Layer 4 smoke test: dist/index.js against HTTP fake', () => {
 
     expect(result.code).toBe(0)
     expect(result.stdout).toMatch(/::set-output name=cla_passed::true/)
+    expect(result.stdout).toMatch(/::set-output name=api_result::success/)
 
     const sigFile = fake
       .repo('acme', 'widgets')
