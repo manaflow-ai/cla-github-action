@@ -89,9 +89,9 @@ jobs:
       contents: write # this can be read if signatures are in a remote repository
       issues: write
       pull-requests: write
-      # No statuses permission is needed. The action fails or succeeds this
-      # GitHub Actions job through @actions/core and never calls the commit
-      # status or check-run APIs.
+      # The action fails or succeeds this job through @actions/core and never
+      # writes commit statuses or check runs. Add `statuses: read` only when
+      # trusted-merge-status-context is set; it reads merge commit statuses.
     # Advisory signer only. A separate trusted exact-head worker is required
     # when this check is required by branch protection. Serialize signer runs
     # for one Pull Request. A separate lock job uses the
@@ -264,6 +264,12 @@ and `remote-repository-name`: `<your repo name>` in your CLA workflow file.
 
 Use `allowlist-ids` for maintainers and documented automation accounts that never need to sign. Values are comma-separated numeric GitHub database IDs. A configured ID is exempt as the Pull Request opener and as a primary commit author, and an allowlisted opener also bypasses the opener-authorship hard-fail. Unlinked identities have no ID and can never match. The deprecated `allowlist` name, email, and glob input is ignored because commit metadata can spoof those values.
 
+##### Trusted merge status
+
+A workflow that merges the base branch into open Pull Requests (a "catch-up" bot) authors merge commits as its own bot account, which cannot sign. To exempt those merges without trusting any git metadata, have that workflow post a commit status on each merge commit it verified, then set `trusted-merge-status-context` to the status context and `trusted-merge-status-creator-ids` to the numeric ID of the account that posts it (41898282 for `github-actions[bot]` using the workflow's `GITHUB_TOKEN`). A commit is exempt only when it has two or more parents and this repository's newest status with that context is a success created by a configured account. Statuses are stored per repository and need statuses write access to create, so a fork cannot vouch for its own commits. Post the status before the merge reaches the Pull Request branch, for example by pushing the commit to a scratch ref first, so the check that the push starts already sees it. Grant `statuses: read` to the signer job (and to a `signer-preflight` gate) when these inputs are set: an explicit permissions list leaves it at `none`, and the status request then fails the run.
+
+The creator ID is the whole trust anchor, so configure only an account whose status-write credential is held by trusted code. `github-actions[bot]` qualifies only if no workflow in the repository gives Pull Request-controlled code a `GITHUB_TOKEN` with `statuses: write` (for example a `pull_request_target` or `workflow_run` job that checks out and runs the head). If one does, use a dedicated GitHub App whose key only the merge workflow can read. Statuses are paged newest first; the action reads up to 5 pages of 100, and a context not found in them counts as unvouched.
+
 ##### Demo for step 5
 
 ![allowlist](https://github.com/cla-assistant/github-action/blob/master/images/allowlist.gif?raw=true)
@@ -299,6 +305,8 @@ Do not configure `PERSONAL_ACCESS_TOKEN` when signatures stay in the current rep
 | `expected-comment-created-at`   | _optional_  | Exact creation timestamp emitted by `signer-preflight` for the authenticated signing comment. Required when `expected-comment-id` is set. | `${{ steps.preflight.outputs.comment_created_at }}` |
 | `expected-comment-author-id`   | _optional_  | Numeric GitHub account ID emitted by `signer-preflight` for the authenticated signing comment. Required when `expected-comment-id` is set. | `${{ steps.preflight.outputs.comment_author_id }}` |
 | `allowlist-ids`   | _optional_ | Comma-separated numeric GitHub user IDs that never need to sign, as the opener or as a primary commit author. Unlinked identities cannot match. | Maintainer and reviewed automation account IDs. |
+| `trusted-merge-status-context`   | _optional_ | Commit status context that exempts a merge commit's primary author when this repository's newest status with that context is a success from a configured creator. Set together with `trusted-merge-status-creator-ids`. | `cmux/catch-up` |
+| `trusted-merge-status-creator-ids`   | _optional_ | Comma-separated numeric GitHub account IDs whose trusted merge status counts. | 41898282 |
 | `allowlist`   | _deprecated_ | Ignored. Raw names, emails, and globs are unsafe identity evidence. | |
 | `remote-repository-name`   | _optional_ | provide the remote repository name where all the signatures should be stored . | remote repository name |
 | `remote-organization-name`   | _optional_ | provide the remote organization name where all the signatures should be stored. | remote organization name |
