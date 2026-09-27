@@ -89,6 +89,17 @@ export const getAllowListItem = (): string =>
 export const getAllowListIds = (): string =>
   core.getInput('allowlist-ids', { required: false })
 
+/**
+ * Commit status context that vouches for an automated merge of the base
+ * branch into a Pull Request (see trustedMergeStatus.ts). Empty disables it.
+ */
+export const getTrustedMergeStatusContext = (): string =>
+  core.getInput('trusted-merge-status-context', { required: false }).trim()
+
+/** Numeric account IDs whose trusted merge status counts. */
+export const getTrustedMergeStatusCreatorIds = (): string =>
+  core.getInput('trusted-merge-status-creator-ids', { required: false }).trim()
+
 export const getSignedCommitMessage = (): string =>
   core.getInput('signed-commit-message', { required: false })
 

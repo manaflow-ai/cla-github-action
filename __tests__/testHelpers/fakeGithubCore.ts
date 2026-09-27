@@ -53,6 +53,10 @@ export interface PullRequest {
   merged?: boolean
   state?: 'open' | 'closed'
   commits: Array<{
+    /** Commit SHA; defaults to a unique 40-hex value per commit. */
+    oid?: string
+    /** Number of parents; 2 or more is a merge commit. Defaults to 1. */
+    parentCount?: number
     author: GitActorFixture
     committer?: GitActorFixture
     coAuthors?: GitActorFixture[]
@@ -83,8 +87,16 @@ export interface Workflow {
   runs: WorkflowRun[]
 }
 
+export interface CommitStatusFixture {
+  context: string
+  state: 'success' | 'failure' | 'pending' | 'error'
+  creator: { login: string; id: number } | null
+}
+
 export interface RepoState {
   id: number
+  /** Commit statuses per SHA, newest first like the REST API. */
+  statuses: Map<string, CommitStatusFixture[]>
   files: Map<string, FileRecord>
   comments: Map<number, Comment[]>
   pulls: Map<number, PullRequest>
@@ -104,6 +116,8 @@ export interface FakeRepoHandle {
   listComments(issueNumber: number): Comment[]
   isLocked(issueNumber: number): boolean
   addWorkflow(name: string, runs?: WorkflowRun[]): Workflow
+  /** Record a commit status; the newest is listed first. */
+  addCommitStatus(sha: string, status: CommitStatusFixture): FakeRepoHandle
   state: RepoState
 }
 
@@ -155,6 +169,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       r = {
         id: nextRepoId++,
         files: new Map(),
+        statuses: new Map(),
         comments: new Map(),
         pulls: new Map(),
         workflows: [],
@@ -328,6 +343,21 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       type: 'Bot'
     })
   })
+  addRoute(
+    getRoutes,
+    '/repos/:owner/:repo/commits/:sha/statuses',
+    (m, _body, query) => {
+      const owner = decodeURIComponent(m[1]!)
+      const name = decodeURIComponent(m[2]!)
+      const s = decodeURIComponent(m[3]!)
+      const all = getRepo(owner, name).statuses.get(s) || []
+      return paginate(
+        all,
+        query,
+        `/repos/${owner}/${name}/commits/${s}/statuses`
+      )
+    }
+  )
   addRoute(getRoutes, '/repos/:owner/:repo/git/commits/:sha', m => {
     const s = decodeURIComponent(m[3]!)
     return json(200, { sha: s, tree: { sha: `tree-${s}` } })
@@ -501,9 +531,11 @@ export function createFakeGitHubCore(): FakeGitHubCore {
           }
         : null
     })
-    const edges = pr.commits.map(c => ({
+    const edges = pr.commits.map((c, index) => ({
       node: {
         commit: {
+          oid: c.oid ?? (index + 1).toString(16).padStart(40, 'c'),
+          parents: { totalCount: c.parentCount ?? 1 },
           message: c.message || '',
           author: actor(c.author),
           committer: actor(c.committer || c.author),
@@ -630,6 +662,12 @@ export function createFakeGitHubCore(): FakeGitHubCore {
         return recordedLocks.some(
           l => l.owner === owner && l.repo === name && l.issue === issueNumber
         )
+      },
+      addCommitStatus(sha_, status) {
+        const list = repo.statuses.get(sha_) || []
+        list.unshift({ ...status })
+        repo.statuses.set(sha_, list)
+        return this
       },
       addWorkflow(name_, runs = []) {
         const wf: Workflow = {

@@ -48131,6 +48131,13 @@ const getExpectedSigningComment = () => {
 const getRequiredBaseRef = () => getInput('required-base-ref', { required: false }) || 'main';
 const getAllowListItem = () => getInput('allowlist', { required: false });
 const getAllowListIds = () => getInput('allowlist-ids', { required: false });
+/**
+ * Commit status context that vouches for an automated merge of the base
+ * branch into a Pull Request (see trustedMergeStatus.ts). Empty disables it.
+ */
+const getTrustedMergeStatusContext = () => getInput('trusted-merge-status-context', { required: false }).trim();
+/** Numeric account IDs whose trusted merge status counts. */
+const getTrustedMergeStatusCreatorIds = () => getInput('trusted-merge-status-creator-ids', { required: false }).trim();
 const getSignedCommitMessage = () => getInput('signed-commit-message', { required: false });
 const getCreateFileCommitMessage = () => getInput('create-file-commit-message', { required: false });
 const getCustomNotSignedPrComment = () => getInput('custom-notsigned-prcomment', { required: false });
@@ -48322,8 +48329,84 @@ const MAX_LEDGER_WRITE_ATTEMPTS = 3;
 // A first-file create can lose a race with another Pull Request. Retry only
 // the safe read that confirms the other run created a valid ledger.
 const MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS = 3;
+// Commit status lookups for merge commits that may be vouched for by a
+// trusted merge status. Merge commits past this bound are treated as
+// unvouched and their authors must sign as usual.
+const MAX_TRUSTED_MERGE_STATUS_LOOKUPS = 20;
+
+;// CONCATENATED MODULE: ./src/trustedMergeStatus.ts
+
+
+
+
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+/**
+ * Reads the optional trusted merge vouching configuration. Both inputs are
+ * required together; a partial or malformed configuration fails the run
+ * instead of silently widening or narrowing who must sign.
+ */
+function getTrustedMergeStatus() {
+    const statusContext = getTrustedMergeStatusContext();
+    const rawIds = getTrustedMergeStatusCreatorIds();
+    if (!statusContext && !rawIds)
+        return undefined;
+    if (!statusContext || !rawIds) {
+        throw new Error('trusted-merge-status-context and trusted-merge-status-creator-ids must be provided together');
+    }
+    if (/[\r\n]/.test(statusContext) || statusContext.length > 255) {
+        throw new Error('trusted-merge-status-context is malformed');
+    }
+    const creatorIds = new Set();
+    for (const raw of rawIds.split(',')) {
+        const entry = raw.trim();
+        const id = Number(entry);
+        if (!/^[1-9][0-9]*$/.test(entry) || !Number.isSafeInteger(id)) {
+            throw new Error('trusted-merge-status-creator-ids must be comma-separated numeric GitHub account IDs');
+        }
+        creatorIds.add(id);
+    }
+    return {
+        context: statusContext,
+        creatorIds,
+        remainingLookups: MAX_TRUSTED_MERGE_STATUS_LOOKUPS
+    };
+}
+/**
+ * A merge commit is exempt from signing when this repository's newest commit
+ * status with the configured context is a success created by a configured
+ * account. Commit statuses are stored per repository and only a token with
+ * statuses write access to this repository can create one, so a fork cannot
+ * vouch for its own commits, and git author, committer, and signature
+ * metadata play no part. The status names one exact commit, so it cannot be
+ * moved to a different tree. Single-parent commits are never exempt.
+ */
+async function isTrustedMergeCommit(commit, trust) {
+    if (!commit.parents || commit.parents.totalCount < 2)
+        return false;
+    if (typeof commit.oid !== 'string' || !COMMIT_SHA.test(commit.oid)) {
+        return false;
+    }
+    if (trust.remainingLookups <= 0)
+        return false;
+    trust.remainingLookups -= 1;
+    // Newest first. Only the newest status for the context counts, so a later
+    // failure or a later status from another account revokes the exemption.
+    const response = await octokit.rest.repos.listCommitStatusesForRef({
+        owner: github_context.repo.owner,
+        repo: github_context.repo.repo,
+        ref: commit.oid,
+        per_page: 100
+    });
+    const newest = response.data.find(status => status.context === trust.context);
+    const creatorId = newest?.creator?.id;
+    return Boolean(newest &&
+        newest.state === 'success' &&
+        typeof creatorId === 'number' &&
+        trust.creatorIds.has(creatorId));
+}
 
 ;// CONCATENATED MODULE: ./src/graphql.ts
+
 
 
 
@@ -48341,6 +48424,8 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
                 edges {
                     node {
                         commit {
+                            oid
+                            parents { totalCount }
                             author {
                                 email
                                 name
@@ -48370,7 +48455,9 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
  * collected so the opener authorship guard can accept a Co-authored-by
  * trailer. The git committer field is ignored: it names whoever applied the
  * commit (a maintainer, GitHub's web-flow merge, a rebase tool), not a
- * copyright holder, so it never creates a signing obligation.
+ * copyright holder, so it never creates a signing obligation. A merge commit
+ * vouched for by a trusted merge status (trustedMergeStatus.ts) contributes
+ * no identities at all.
  */
 async function getCommitters(expectedHeadSha) {
     try {
@@ -48378,6 +48465,7 @@ async function getCommitters(expectedHeadSha) {
             throw new Error('The live Pull Request head commit is missing; refusing to query commit identities');
         }
         const committers = new Map();
+        const trustedMergeStatus = getTrustedMergeStatus();
         const addActor = (actor, role) => {
             const roles = {
                 isPrimaryAuthor: role === 'primaryAuthor',
@@ -48452,6 +48540,10 @@ async function getCommitters(expectedHeadSha) {
                 identityAssertionCount += commit.authors.nodes.length;
                 if (identityAssertionCount > MAX_GIT_IDENTITY_ASSERTIONS) {
                     throw new Error(`A Pull Request reports more than ${MAX_GIT_IDENTITY_ASSERTIONS} git identity assertions. The action will fail closed.`);
+                }
+                if (trustedMergeStatus &&
+                    (await isTrustedMergeCommit(commit, trustedMergeStatus))) {
+                    continue;
                 }
                 addActor(commit.author, 'primaryAuthor');
                 commit.authors.nodes

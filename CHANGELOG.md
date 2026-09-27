@@ -11,6 +11,14 @@ commit that introduced it.
 
 ## Unreleased
 
+### Added
+
+- `trusted-merge-status-context` and `trusted-merge-status-creator-ids`
+  exempt a merge commit from signing when this repository's newest commit
+  status with that context is a success created by a configured account.
+  Automated base-branch merges authored by a bot no longer fail the check,
+  and no git name, email, or signature is trusted.
+
 ### Security
 
 - The write-capable signer now emits `cla_passed=true` only after final

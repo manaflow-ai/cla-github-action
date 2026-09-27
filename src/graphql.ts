@@ -3,6 +3,10 @@ import { Committer } from './interfaces'
 import { octokit } from './octokit'
 import { errorMessage } from './shared/errors'
 import {
+  getTrustedMergeStatus,
+  isTrustedMergeCommit
+} from './trustedMergeStatus'
+import {
   MAX_AUTHORS_PER_COMMIT,
   MAX_GIT_IDENTITY_ASSERTIONS,
   MAX_PULL_REQUEST_COMMITS
@@ -25,6 +29,8 @@ interface GraphQLAuthorsConnection {
 }
 
 interface GraphQLCommit {
+  oid?: string | null
+  parents?: { totalCount: number } | null
   author?: GraphQLActor | null
   authors: GraphQLAuthorsConnection
 }
@@ -62,6 +68,8 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
                 edges {
                     node {
                         commit {
+                            oid
+                            parents { totalCount }
                             author {
                                 email
                                 name
@@ -92,7 +100,9 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
  * collected so the opener authorship guard can accept a Co-authored-by
  * trailer. The git committer field is ignored: it names whoever applied the
  * commit (a maintainer, GitHub's web-flow merge, a rebase tool), not a
- * copyright holder, so it never creates a signing obligation.
+ * copyright holder, so it never creates a signing obligation. A merge commit
+ * vouched for by a trusted merge status (trustedMergeStatus.ts) contributes
+ * no identities at all.
  */
 export default async function getCommitters(
   expectedHeadSha: string
@@ -104,6 +114,7 @@ export default async function getCommitters(
       )
     }
     const committers = new Map<string, Committer>()
+    const trustedMergeStatus = getTrustedMergeStatus()
 
     const addActor = (
       actor: GraphQLActor | null | undefined,
@@ -208,6 +219,13 @@ export default async function getCommitters(
           throw new Error(
             `A Pull Request reports more than ${MAX_GIT_IDENTITY_ASSERTIONS} git identity assertions. The action will fail closed.`
           )
+        }
+
+        if (
+          trustedMergeStatus &&
+          (await isTrustedMergeCommit(commit, trustedMergeStatus))
+        ) {
+          continue
         }
 
         addActor(commit.author, 'primaryAuthor')
