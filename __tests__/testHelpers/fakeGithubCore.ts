@@ -343,6 +343,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
       type: 'Bot'
     })
   })
+  // Commit statuses for one SHA in one repository, newest first, paginated.
   addRoute(
     getRoutes,
     '/repos/:owner/:repo/commits/:sha/statuses',
@@ -663,6 +664,7 @@ export function createFakeGitHubCore(): FakeGitHubCore {
           l => l.owner === owner && l.repo === name && l.issue === issueNumber
         )
       },
+      /** Prepends a status so the list stays newest first, like the API. */
       addCommitStatus(sha_, status) {
         const list = repo.statuses.get(sha_) || []
         list.unshift({ ...status })

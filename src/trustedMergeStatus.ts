@@ -4,14 +4,19 @@ import {
   getTrustedMergeStatusContext,
   getTrustedMergeStatusCreatorIds
 } from './shared/getInputs'
-import { MAX_TRUSTED_MERGE_STATUS_LOOKUPS } from './shared/limits'
+import {
+  MAX_TRUSTED_MERGE_STATUS_LOOKUPS,
+  MAX_TRUSTED_MERGE_STATUS_PAGES
+} from './shared/limits'
 
+/** Parsed trusted merge status configuration plus the remaining lookup budget. */
 interface TrustedMergeStatus {
   context: string
   creatorIds: Set<number>
   remainingLookups: number
 }
 
+/** The GraphQL commit fields the exemption needs. */
 interface CommitShape {
   oid?: string | null
   parents?: { totalCount: number } | null
@@ -74,15 +79,7 @@ export async function isTrustedMergeCommit(
   if (trust.remainingLookups <= 0) return false
   trust.remainingLookups -= 1
 
-  // Newest first. Only the newest status for the context counts, so a later
-  // failure or a later status from another account revokes the exemption.
-  const response = await octokit.rest.repos.listCommitStatusesForRef({
-    owner: context.repo.owner,
-    repo: context.repo.repo,
-    ref: commit.oid,
-    per_page: 100
-  })
-  const newest = response.data.find(status => status.context === trust.context)
+  const newest = await findNewestStatus(commit.oid, trust.context)
   const creatorId = newest?.creator?.id
   return Boolean(
     newest &&
@@ -90,4 +87,30 @@ export async function isTrustedMergeCommit(
     typeof creatorId === 'number' &&
     trust.creatorIds.has(creatorId)
   )
+}
+
+/**
+ * Returns this repository's newest status for `statusContext` on `sha`, or
+ * undefined. GitHub lists statuses newest first, 100 per page, so the first
+ * match is the newest. Only the newest status counts: a later failure or a
+ * later status from another account revokes the exemption. Paging stops at
+ * MAX_TRUSTED_MERGE_STATUS_PAGES; a context not found by then is unvouched.
+ */
+async function findNewestStatus(
+  sha: string,
+  statusContext: string
+): Promise<{ state: string; creator?: { id: number } | null } | undefined> {
+  for (let page = 1; page <= MAX_TRUSTED_MERGE_STATUS_PAGES; page++) {
+    const response = await octokit.rest.repos.listCommitStatusesForRef({
+      owner: context.repo.owner,
+      repo: context.repo.repo,
+      ref: sha,
+      per_page: 100,
+      page
+    })
+    const match = response.data.find(status => status.context === statusContext)
+    if (match) return match
+    if (response.data.length < 100) return undefined
+  }
+  return undefined
 }

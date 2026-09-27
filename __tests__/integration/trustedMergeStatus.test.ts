@@ -8,6 +8,7 @@ const MERGE_SHA = 'a'.repeat(40)
 const ACTIONS_BOT = { login: 'github-actions[bot]', id: 41898282 }
 const CATCH_UP = 'cmux/catch-up'
 
+/** Runs the action's main entry with a fresh module cache and Octokit. */
 async function runAction() {
   reloadOctokit()
   for (const path of Object.keys(require.cache)) {
@@ -17,6 +18,7 @@ async function runAction() {
   await run()
 }
 
+/** Spies on setFailed, info, and setOutput; restore() undoes the spies. */
 function watchCore() {
   const failed = jest.spyOn(core, 'setFailed').mockImplementation(() => {})
   const info = jest.spyOn(core, 'info').mockImplementation(() => {})
@@ -44,6 +46,11 @@ describe('trusted merge status', () => {
     resetEnv()
   })
 
+  /**
+   * Builds PR 12 in acme/widgets: a signed commit by alice and a merge commit
+   * by github-actions[bot], with the given merge statuses (oldest first) in
+   * this repository and optionally in a fork, then sets the event context.
+   */
   function setUp(options: {
     inputs?: Record<string, string>
     parentCount?: number
@@ -211,6 +218,37 @@ describe('trusted merge status', () => {
     expect(watch.failures.join('\n')).toMatch(
       /must be comma-separated numeric GitHub account IDs/
     )
+    watch.restore()
+  })
+
+  /** `count` statuses for an unrelated context, all newer than `success`. */
+  function otherStatuses(count: number): CommitStatusFixture[] {
+    return Array.from({ length: count }, () => ({
+      context: 'ci/other',
+      state: 'success' as const,
+      creator: ACTIONS_BOT
+    }))
+  }
+
+  it('finds the trusted status past the first page', async () => {
+    setUp({ statuses: [success, ...otherStatuses(150)] })
+    const watch = watchCore()
+    await runAction()
+    expect(watch.failures).toEqual([])
+    expect(watch.outputs).toContainEqual(['cla_passed', true])
+    watch.restore()
+  })
+
+  it('treats a context beyond the page bound as unvouched', async () => {
+    setUp({ statuses: [success, ...otherStatuses(500)] })
+    const watch = watchCore()
+    await runAction()
+    expect(watch.failures.join('\n')).toMatch(
+      /Committers of Pull Request number 12/
+    )
+    expect(
+      fake.requestLog.filter(r => r.path.includes('/statuses')).length
+    ).toBe(5)
     watch.restore()
   })
 })

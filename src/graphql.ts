@@ -116,6 +116,7 @@ export default async function getCommitters(
     const committers = new Map<string, Committer>()
     const trustedMergeStatus = getTrustedMergeStatus()
 
+    /** Records one GitHub actor under the given role, merging duplicates. */
     const addActor = (
       actor: GraphQLActor | null | undefined,
       role: CommitIdentityRole
@@ -265,6 +266,10 @@ export default async function getCommitters(
   }
 }
 
+/**
+ * Adds an identity to the map, or merges its roles and email into the
+ * existing entry for the same account ID, email, or name.
+ */
 function addCommitter(
   committers: Map<string, Committer>,
   incoming: Committer
@@ -283,12 +288,17 @@ function addCommitter(
   if (!current.email && incoming.email) current.email = incoming.email
 }
 
+/** Map key for an identity: account ID, else email, else lowercased name. */
 function identityKey(committer: Committer): string {
   if (committer.id > 0) return `id:${committer.id}`
   if (committer.email) return `email:${committer.email.toLowerCase()}`
   return `unknown:${committer.name.toLowerCase()}`
 }
 
+/**
+ * Whether two GraphQL actors are the same identity: by account ID when both
+ * have one, otherwise by case-insensitive email.
+ */
 function actorsMatch(
   left: GraphQLActor,
   right: GraphQLActor | null | undefined

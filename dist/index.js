@@ -48333,6 +48333,9 @@ const MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS = 3;
 // trusted merge status. Merge commits past this bound are treated as
 // unvouched and their authors must sign as usual.
 const MAX_TRUSTED_MERGE_STATUS_LOOKUPS = 20;
+// Status pages (100 each, newest first) searched for the trusted context on
+// one merge commit. A context not found within them counts as unvouched.
+const MAX_TRUSTED_MERGE_STATUS_PAGES = 5;
 
 ;// CONCATENATED MODULE: ./src/trustedMergeStatus.ts
 
@@ -48389,20 +48392,36 @@ async function isTrustedMergeCommit(commit, trust) {
     if (trust.remainingLookups <= 0)
         return false;
     trust.remainingLookups -= 1;
-    // Newest first. Only the newest status for the context counts, so a later
-    // failure or a later status from another account revokes the exemption.
-    const response = await octokit.rest.repos.listCommitStatusesForRef({
-        owner: github_context.repo.owner,
-        repo: github_context.repo.repo,
-        ref: commit.oid,
-        per_page: 100
-    });
-    const newest = response.data.find(status => status.context === trust.context);
+    const newest = await findNewestStatus(commit.oid, trust.context);
     const creatorId = newest?.creator?.id;
     return Boolean(newest &&
         newest.state === 'success' &&
         typeof creatorId === 'number' &&
         trust.creatorIds.has(creatorId));
+}
+/**
+ * Returns this repository's newest status for `statusContext` on `sha`, or
+ * undefined. GitHub lists statuses newest first, 100 per page, so the first
+ * match is the newest. Only the newest status counts: a later failure or a
+ * later status from another account revokes the exemption. Paging stops at
+ * MAX_TRUSTED_MERGE_STATUS_PAGES; a context not found by then is unvouched.
+ */
+async function findNewestStatus(sha, statusContext) {
+    for (let page = 1; page <= MAX_TRUSTED_MERGE_STATUS_PAGES; page++) {
+        const response = await octokit.rest.repos.listCommitStatusesForRef({
+            owner: github_context.repo.owner,
+            repo: github_context.repo.repo,
+            ref: sha,
+            per_page: 100,
+            page
+        });
+        const match = response.data.find(status => status.context === statusContext);
+        if (match)
+            return match;
+        if (response.data.length < 100)
+            return undefined;
+    }
+    return undefined;
 }
 
 ;// CONCATENATED MODULE: ./src/graphql.ts
@@ -48466,6 +48485,7 @@ async function getCommitters(expectedHeadSha) {
         }
         const committers = new Map();
         const trustedMergeStatus = getTrustedMergeStatus();
+        /** Records one GitHub actor under the given role, merging duplicates. */
         const addActor = (actor, role) => {
             const roles = {
                 isPrimaryAuthor: role === 'primaryAuthor',
@@ -48571,6 +48591,10 @@ async function getCommitters(expectedHeadSha) {
         throw new Error(`GraphQL call to get commit identities failed: ${errorMessage(e)}`);
     }
 }
+/**
+ * Adds an identity to the map, or merges its roles and email into the
+ * existing entry for the same account ID, email, or name.
+ */
 function addCommitter(committers, incoming) {
     const key = identityKey(incoming);
     const current = committers.get(key);
@@ -48583,6 +48607,7 @@ function addCommitter(committers, incoming) {
     if (!current.email && incoming.email)
         current.email = incoming.email;
 }
+/** Map key for an identity: account ID, else email, else lowercased name. */
 function identityKey(committer) {
     if (committer.id > 0)
         return `id:${committer.id}`;
@@ -48590,6 +48615,10 @@ function identityKey(committer) {
         return `email:${committer.email.toLowerCase()}`;
     return `unknown:${committer.name.toLowerCase()}`;
 }
+/**
+ * Whether two GraphQL actors are the same identity: by account ID when both
+ * have one, otherwise by case-insensitive email.
+ */
 function actorsMatch(left, right) {
     if (!right)
         return false;

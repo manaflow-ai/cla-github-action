@@ -89,9 +89,9 @@ jobs:
       contents: write # this can be read if signatures are in a remote repository
       issues: write
       pull-requests: write
-      # No statuses permission is needed. The action fails or succeeds this
-      # GitHub Actions job through @actions/core and never calls the commit
-      # status or check-run APIs.
+      # The action fails or succeeds this job through @actions/core and never
+      # writes commit statuses or check runs. Add `statuses: read` only when
+      # trusted-merge-status-context is set; it reads merge commit statuses.
     # Advisory signer only. A separate trusted exact-head worker is required
     # when this check is required by branch protection. Serialize signer runs
     # for one Pull Request. A separate lock job uses the
@@ -266,7 +266,9 @@ Use `allowlist-ids` for maintainers and documented automation accounts that neve
 
 ##### Trusted merge status
 
-A workflow that merges the base branch into open Pull Requests (a "catch-up" bot) authors merge commits as its own bot account, which cannot sign. To exempt those merges without trusting any git metadata, have that workflow post a commit status on each merge commit it verified, then set `trusted-merge-status-context` to the status context and `trusted-merge-status-creator-ids` to the numeric ID of the account that posts it (41898282 for `github-actions[bot]` using the workflow's `GITHUB_TOKEN`). A commit is exempt only when it has two or more parents and this repository's newest status with that context is a success created by a configured account. Statuses are stored per repository and need statuses write access to create, so a fork cannot vouch for its own commits. Post the status before the merge reaches the Pull Request branch, for example by pushing the commit to a scratch ref first, so the check that the push starts already sees it.
+A workflow that merges the base branch into open Pull Requests (a "catch-up" bot) authors merge commits as its own bot account, which cannot sign. To exempt those merges without trusting any git metadata, have that workflow post a commit status on each merge commit it verified, then set `trusted-merge-status-context` to the status context and `trusted-merge-status-creator-ids` to the numeric ID of the account that posts it (41898282 for `github-actions[bot]` using the workflow's `GITHUB_TOKEN`). A commit is exempt only when it has two or more parents and this repository's newest status with that context is a success created by a configured account. Statuses are stored per repository and need statuses write access to create, so a fork cannot vouch for its own commits. Post the status before the merge reaches the Pull Request branch, for example by pushing the commit to a scratch ref first, so the check that the push starts already sees it. Grant `statuses: read` to the signer job (and to a `signer-preflight` gate) when these inputs are set: an explicit permissions list leaves it at `none`, and the status request then fails the run.
+
+The creator ID is the whole trust anchor, so configure only an account whose status-write credential is held by trusted code. `github-actions[bot]` qualifies only if no workflow in the repository gives Pull Request-controlled code a `GITHUB_TOKEN` with `statuses: write` (for example a `pull_request_target` or `workflow_run` job that checks out and runs the head). If one does, use a dedicated GitHub App whose key only the merge workflow can read. Statuses are paged newest first; the action reads up to 5 pages of 100, and a context not found in them counts as unvouched.
 
 ##### Demo for step 5
 
