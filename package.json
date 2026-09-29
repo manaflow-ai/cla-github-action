@@ -34,7 +34,7 @@
   },
   "overrides": {
     "@actions/http-client": "4.0.1",
-    "undici": "8.10.0"
+    "undici": "8.10.2"
   },
   "devDependencies": {
     "@actions/core-cjs": "npm:@actions/core@1.11.1",
@@ -50,7 +50,7 @@
     "publint": "^0.3.18",
     "ts-jest": "^29.0.5",
     "typescript": "^6.0.3",
-    "undici": "8.10.0",
+    "undici": "8.10.2",
     "undici-cjs": "npm:undici@6.28.0"
   },
   "author": "ibakshay",
