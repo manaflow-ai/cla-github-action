@@ -58,6 +58,20 @@ inputs:
   allowlist-ids:
     description: "Comma-separated numeric GitHub user IDs that never need to sign, as the Pull Request opener or as a commit author. Unlinked identities cannot match."
     default: ""
+  trusted-merge-status-context:
+    description: >
+      Optional commit status context that vouches for an automated merge of
+      the base branch into a Pull Request. A merge commit (two or more
+      parents) needs no signature from its primary author when this
+      repository's newest status with this context is a success created by an
+      account in trusted-merge-status-creator-ids. Set both inputs or neither.
+    default: ""
+  trusted-merge-status-creator-ids:
+    description: >
+      Comma-separated numeric GitHub account IDs whose trusted merge status
+      counts, for example 41898282 for github-actions[bot] when a workflow in
+      this repository posts the status with its GITHUB_TOKEN.
+    default: ""
   remote-repository-name:
     description: "provide the remote repository name where all the signatures should be stored"
   remote-organization-name:

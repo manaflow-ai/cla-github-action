@@ -3,6 +3,10 @@ import { Committer } from './interfaces'
 import { octokit } from './octokit'
 import { errorMessage } from './shared/errors'
 import {
+  getTrustedMergeStatus,
+  isTrustedMergeCommit
+} from './trustedMergeStatus'
+import {
   MAX_AUTHORS_PER_COMMIT,
   MAX_GIT_IDENTITY_ASSERTIONS,
   MAX_PULL_REQUEST_COMMITS
@@ -25,6 +29,8 @@ interface GraphQLAuthorsConnection {
 }
 
 interface GraphQLCommit {
+  oid?: string | null
+  parents?: { totalCount: number } | null
   author?: GraphQLActor | null
   authors: GraphQLAuthorsConnection
 }
@@ -62,6 +68,8 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
                 edges {
                     node {
                         commit {
+                            oid
+                            parents { totalCount }
                             author {
                                 email
                                 name
@@ -92,7 +100,9 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
  * collected so the opener authorship guard can accept a Co-authored-by
  * trailer. The git committer field is ignored: it names whoever applied the
  * commit (a maintainer, GitHub's web-flow merge, a rebase tool), not a
- * copyright holder, so it never creates a signing obligation.
+ * copyright holder, so it never creates a signing obligation. A merge commit
+ * vouched for by a trusted merge status (trustedMergeStatus.ts) contributes
+ * no identities at all.
  */
 export default async function getCommitters(
   expectedHeadSha: string
@@ -104,7 +114,9 @@ export default async function getCommitters(
       )
     }
     const committers = new Map<string, Committer>()
+    const trustedMergeStatus = getTrustedMergeStatus()
 
+    /** Records one GitHub actor under the given role, merging duplicates. */
     const addActor = (
       actor: GraphQLActor | null | undefined,
       role: CommitIdentityRole
@@ -210,6 +222,13 @@ export default async function getCommitters(
           )
         }
 
+        if (
+          trustedMergeStatus &&
+          (await isTrustedMergeCommit(commit, trustedMergeStatus))
+        ) {
+          continue
+        }
+
         addActor(commit.author, 'primaryAuthor')
         commit.authors.nodes
           .slice(1)
@@ -247,6 +266,10 @@ export default async function getCommitters(
   }
 }
 
+/**
+ * Adds an identity to the map, or merges its roles and email into the
+ * existing entry for the same account ID, email, or name.
+ */
 function addCommitter(
   committers: Map<string, Committer>,
   incoming: Committer
@@ -265,12 +288,17 @@ function addCommitter(
   if (!current.email && incoming.email) current.email = incoming.email
 }
 
+/** Map key for an identity: account ID, else email, else lowercased name. */
 function identityKey(committer: Committer): string {
   if (committer.id > 0) return `id:${committer.id}`
   if (committer.email) return `email:${committer.email.toLowerCase()}`
   return `unknown:${committer.name.toLowerCase()}`
 }
 
+/**
+ * Whether two GraphQL actors are the same identity: by account ID when both
+ * have one, otherwise by case-insensitive email.
+ */
 function actorsMatch(
   left: GraphQLActor,
   right: GraphQLActor | null | undefined

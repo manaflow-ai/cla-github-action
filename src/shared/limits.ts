@@ -24,3 +24,10 @@ export const MAX_LEDGER_WRITE_ATTEMPTS = 3
 // A first-file create can lose a race with another Pull Request. Retry only
 // the safe read that confirms the other run created a valid ledger.
 export const MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS = 3
+// Commit status lookups for merge commits that may be vouched for by a
+// trusted merge status. Merge commits past this bound are treated as
+// unvouched and their authors must sign as usual.
+export const MAX_TRUSTED_MERGE_STATUS_LOOKUPS = 20
+// Status pages (100 each, newest first) searched for the trusted context on
+// one merge commit. A context not found within them counts as unvouched.
+export const MAX_TRUSTED_MERGE_STATUS_PAGES = 5
