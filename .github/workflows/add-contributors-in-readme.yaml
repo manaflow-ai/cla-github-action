@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   contrib-readme-job:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     name: A job to automate contrib in readme
     steps:
