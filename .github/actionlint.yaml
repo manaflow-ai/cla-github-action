@@ -1,0 +1,5 @@
+self-hosted-runner:
+  # Blacksmith runner labels (manaflow-ai uses Blacksmith instead of
+  # GitHub-hosted runners).
+  labels:
+    - blacksmith-*
