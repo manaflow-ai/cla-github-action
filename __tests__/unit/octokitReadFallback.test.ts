@@ -1,5 +1,6 @@
 import { getOctokit } from '@actions/github'
 import {
+  isGraphqlRateLimited,
   isReadRequest,
   isRateLimited,
   withReadFallback
@@ -111,6 +112,42 @@ describe('CLA_READ_TOKEN fallback', () => {
     }
   })
 
+  it('moves a GraphQL query whose 200 response reports RATE_LIMITED', async () => {
+    const calls: Call[] = []
+    const fetch = jest.fn(async (url: string, init: RequestInit) => {
+      const auth = new Headers(init.headers).get('authorization') || ''
+      calls.push({ method: init.method || 'GET', url: String(url), auth })
+      const body = auth.includes('workflow-token')
+        ? {
+            errors: [
+              { type: 'RATE_LIMITED', message: 'API rate limit exceeded' }
+            ]
+          }
+        : { data: { viewer: { login: 'reader' } } }
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    })
+    const options = { request: { fetch } }
+    const client = withReadFallback(
+      getOctokit('workflow-token', options),
+      'app-read-token',
+      options
+    )
+    const result = (await client.graphql('query { viewer { login } }')) as {
+      viewer: { login: string }
+    }
+    expect(result.viewer.login).toBe('reader')
+    expect(calls.map(c => c.auth.split(' ')[1])).toEqual([
+      'workflow-token',
+      'app-read-token'
+    ])
+    calls.length = 0
+    await expect(client.graphql('mutation { x }')).rejects.toBeTruthy()
+    expect(calls).toHaveLength(1)
+  })
+
   it('leaves a refusal that is not a spent budget alone', async () => {
     expect(
       isRateLimited({
@@ -137,5 +174,9 @@ describe('CLA_READ_TOKEN fallback', () => {
       })
     ).toBe(false)
     expect(isReadRequest({ method: 'GET', url: '/repos/o/r' })).toBe(true)
+    expect(
+      isGraphqlRateLimited({ data: { errors: [{ type: 'NOT_FOUND' }] } })
+    ).toBe(false)
+    expect(isGraphqlRateLimited({ data: { viewer: {} } })).toBe(false)
   })
 })

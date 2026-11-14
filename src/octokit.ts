@@ -56,44 +56,65 @@ export function isRateLimited(error: unknown): boolean {
   )
 }
 
+/**
+ * Whether a GraphQL response that resolved (HTTP 200) reports a spent budget:
+ * GitHub answers a spent GraphQL budget with an `errors` entry of type
+ * RATE_LIMITED, not with a 403.
+ */
+export function isGraphqlRateLimited(response: unknown): boolean {
+  const errors = (response as { data?: { errors?: unknown } })?.data?.errors
+  if (!Array.isArray(errors)) return false
+  return errors.some(item => {
+    const e = item as { type?: unknown; message?: unknown }
+    return (
+      e?.type === 'RATE_LIMITED' || /rate limit/i.test(String(e?.message || ''))
+    )
+  })
+}
+
 let readFallbackNoted = false
 
 /**
  * The workflow token's client. When CLA_READ_TOKEN is set, a read that the
- * workflow token's spent budget refuses is sent once more on that token
- * (another installation, another budget). Writes always stay on
- * GITHUB_TOKEN, so comments and ledger commits keep the github-actions[bot]
- * identity the marker-comment check trusts.
+ * workflow token's spent budget refuses (a 403 or 429, or a GraphQL response
+ * reporting RATE_LIMITED) is sent once more on that token (another
+ * installation, another budget). Writes always stay on GITHUB_TOKEN, so
+ * comments and ledger commits keep the github-actions[bot] identity the
+ * marker-comment check trusts.
  */
 export function withReadFallback(
   client: Octokit,
   readToken: string,
-  options?: OctokitOptions
+  clientOptions?: OctokitOptions
 ): Octokit {
   let reader: Octokit | undefined
-  client.hook.wrap('request', async (request, options) => {
-    try {
-      return await request(options)
-    } catch (error) {
-      if (!isReadRequest(options as RequestOptions) || !isRateLimited(error)) {
-        throw error
-      }
-      if (!readFallbackNoted) {
-        readFallbackNoted = true
-        core.warning(
-          'GITHUB_TOKEN rate limit reached; reads continue on CLA_READ_TOKEN, writes stay on GITHUB_TOKEN.'
-        )
-      }
-      reader = reader || buildOctokit(readToken, options)
-      const {
-        headers,
-        request: _transport,
-        ...rest
-      } = options as RequestOptions
-      const plain = { ...(headers || {}) }
-      delete plain.authorization
-      return reader.request({ ...rest, headers: plain } as never)
+  const retryOnReader = async (requestOptions: RequestOptions) => {
+    if (!readFallbackNoted) {
+      readFallbackNoted = true
+      core.warning(
+        'GITHUB_TOKEN rate limit reached; reads continue on CLA_READ_TOKEN, writes stay on GITHUB_TOKEN.'
+      )
     }
+    reader = reader || buildOctokit(readToken, clientOptions)
+    const { headers, request: _transport, ...rest } = requestOptions
+    const plain = { ...(headers || {}) }
+    delete plain.authorization
+    return reader.request({ ...rest, headers: plain } as never)
+  }
+  client.hook.wrap('request', async (request, options) => {
+    const requestOptions = options as RequestOptions
+    const read = isReadRequest(requestOptions)
+    let response
+    try {
+      response = await request(options)
+    } catch (error) {
+      if (!read || !isRateLimited(error)) throw error
+      return retryOnReader(requestOptions)
+    }
+    if (read && isGraphqlRateLimited(response)) {
+      return (await retryOnReader(requestOptions)) as typeof response
+    }
+    return response
   })
   return client
 }
