@@ -48244,12 +48244,93 @@ function readEnvToken(name) {
         throw new Error(`${name} environment variable is required`);
     return v;
 }
-function buildOctokit(token) {
-    return getOctokit(token);
+function buildOctokit(token, options) {
+    return getOctokit(token, options);
+}
+/**
+ * Whether a request only reads: a GET or HEAD, or a GraphQL query (never a
+ * mutation). Only these may move to the read token.
+ */
+function isReadRequest(options) {
+    const method = (options.method || 'GET').toUpperCase();
+    if (method === 'GET' || method === 'HEAD')
+        return true;
+    if (method !== 'POST' || options.url !== '/graphql')
+        return false;
+    const query = typeof options.query === 'string' ? options.query.trim() : '';
+    return query.startsWith('{') || /^query\b/.test(query);
+}
+/**
+ * Whether GitHub refused a request for a spent budget: a 403 or 429 that says
+ * so, or that carries X-RateLimit-Remaining 0.
+ */
+function isRateLimited(error) {
+    const e = error;
+    if (e?.status !== 403 && e?.status !== 429)
+        return false;
+    const remaining = e.response?.headers?.['x-ratelimit-remaining'];
+    return (String(remaining) === '0' || /rate limit/i.test(String(e.message || '')));
+}
+/**
+ * Whether a GraphQL response that resolved (HTTP 200) reports a spent budget:
+ * GitHub answers a spent GraphQL budget with an `errors` entry of type
+ * RATE_LIMITED, not with a 403.
+ */
+function isGraphqlRateLimited(response) {
+    const errors = response?.data?.errors;
+    if (!Array.isArray(errors))
+        return false;
+    return errors.some(item => {
+        const e = item;
+        return (e?.type === 'RATE_LIMITED' || /rate limit/i.test(String(e?.message || '')));
+    });
+}
+let readFallbackNoted = false;
+/**
+ * The workflow token's client. When CLA_READ_TOKEN is set, a read that the
+ * workflow token's spent budget refuses (a 403 or 429, or a GraphQL response
+ * reporting RATE_LIMITED) is sent once more on that token (another
+ * installation, another budget). Writes always stay on GITHUB_TOKEN, so
+ * comments and ledger commits keep the github-actions[bot] identity the
+ * marker-comment check trusts.
+ */
+function withReadFallback(client, readToken, clientOptions) {
+    let reader;
+    const retryOnReader = async (requestOptions) => {
+        if (!readFallbackNoted) {
+            readFallbackNoted = true;
+            warning('GITHUB_TOKEN rate limit reached; reads continue on CLA_READ_TOKEN, writes stay on GITHUB_TOKEN.');
+        }
+        reader = reader || buildOctokit(readToken, clientOptions);
+        const { headers, request: _transport, ...rest } = requestOptions;
+        const plain = { ...(headers || {}) };
+        delete plain.authorization;
+        return reader.request({ ...rest, headers: plain });
+    };
+    client.hook.wrap('request', async (request, options) => {
+        const requestOptions = options;
+        const read = isReadRequest(requestOptions);
+        let response;
+        try {
+            response = await request(options);
+        }
+        catch (error) {
+            if (!read || !isRateLimited(error))
+                throw error;
+            return retryOnReader(requestOptions);
+        }
+        if (read && isGraphqlRateLimited(response)) {
+            return (await retryOnReader(requestOptions));
+        }
+        return response;
+    });
+    return client;
 }
 function getDefaultOctokitClient() {
     if (!defaultClient) {
-        defaultClient = buildOctokit(readEnvToken('GITHUB_TOKEN'));
+        const client = buildOctokit(readEnvToken('GITHUB_TOKEN'));
+        const readToken = process.env.CLA_READ_TOKEN;
+        defaultClient = readToken ? withReadFallback(client, readToken) : client;
     }
     return defaultClient;
 }
@@ -48285,6 +48366,7 @@ function isPersonalAccessTokenPresent() {
 function _resetOctokitClientsForTests() {
     defaultClient = undefined;
     patClient = undefined;
+    readFallbackNoted = false;
 }
 
 ;// CONCATENATED MODULE: ./src/shared/errors.ts
