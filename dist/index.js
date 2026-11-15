@@ -49381,12 +49381,18 @@ async function createComment(signed, committerMap) {
     });
 }
 async function updateComment(signed, committerMap, claBotComment) {
+    const body = commentContent(signed, committerMap);
+    // Rewriting the same body changes nothing a reader sees, but it is a write
+    // on GITHUB_TOKEN, which a spent budget refuses: an all-signed PR then went
+    // red (manaflow-ai/cmux#42518). Skip it and keep the comment as it is.
+    if (claBotComment?.body === body)
+        return claBotComment;
     try {
         const response = await octokit.rest.issues.updateComment({
             owner: github_context.repo.owner,
             repo: github_context.repo.repo,
             comment_id: claBotComment.id,
-            body: commentContent(signed, committerMap)
+            body
         });
         return response.data;
     }

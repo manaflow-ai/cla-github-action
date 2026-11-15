@@ -69,6 +69,8 @@ function dynamicBotCommentInterceptors(
       headers: { 'content-type': 'application/json' }
     })
     .times(listTimes)
+  // No PATCH expected: leave it unmatched, so a write fails the test.
+  if (patchTimes === 0) return
   http
     .github()
     .intercept({
@@ -188,6 +190,37 @@ describe('prCommentSetup', () => {
       },
       [{ name: 'alice', id: 1, pullRequestNo: 42 }]
     )
+
+    http.assertClean()
+  })
+
+  it('writes nothing when the bot comment already says the same', async () => {
+    const {
+      commentContent
+    } = require('../../src/pullrequest/pullRequestCommentContent')
+    const map = {
+      signed: [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+      notSigned: [],
+      unknown: []
+    }
+    canonicalBotInterceptor(http, 3)
+    dynamicBotCommentInterceptors(
+      http,
+      777,
+      [
+        {
+          id: 777,
+          body: commentContent(true, map),
+          user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+          created_at: '2024-01-02'
+        }
+      ],
+      3,
+      0
+    )
+
+    const prCommentSetup = loadModule()
+    await prCommentSetup(map, [{ name: 'alice', id: 1, pullRequestNo: 42 }])
 
     http.assertClean()
   })
