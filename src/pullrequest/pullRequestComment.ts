@@ -141,11 +141,12 @@ export async function preparePrComment(
           }
           await assertBotCommentPlanCurrent(expectedBotComment)
           await beforeWrite?.()
-          await updateComment(
-            reactedCommitters.allSignedFlag,
-            committerMap,
-            claBotComment
-          )
+          // Compare with the body the comment holds now (the first update
+          // above may have changed it), never the body first read.
+          await updateComment(reactedCommitters.allSignedFlag, committerMap, {
+            ...claBotComment,
+            body: expectedBotComment.body
+          })
         })
     }
   } catch (error) {

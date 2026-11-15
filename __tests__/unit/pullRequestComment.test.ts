@@ -160,6 +160,7 @@ describe('prCommentSetup', () => {
 
   it('finds the existing bot comment by the "CLA Assistant Lite bot" marker and updates it', async () => {
     canonicalBotInterceptor(http, 3)
+    // One write: a second update with the same body is skipped.
     dynamicBotCommentInterceptors(
       http,
       777,
@@ -178,7 +179,7 @@ describe('prCommentSetup', () => {
         }
       ],
       3,
-      2
+      1
     )
 
     const prCommentSetup = loadModule()
@@ -225,9 +226,41 @@ describe('prCommentSetup', () => {
     http.assertClean()
   })
 
+  it('compares a second update with the body the first one wrote', async () => {
+    const {
+      commentContent
+    } = require('../../src/pullrequest/pullRequestCommentContent')
+    const map = {
+      signed: [{ name: 'alice', id: 1, pullRequestNo: 42 }],
+      notSigned: [],
+      unknown: []
+    }
+    canonicalBotInterceptor(http, 3)
+    dynamicBotCommentInterceptors(
+      http,
+      777,
+      [
+        {
+          id: 777,
+          body: commentContent(false, map),
+          user: { login: 'github-actions[bot]', id: 41898282, type: 'Bot' },
+          created_at: '2024-01-02'
+        }
+      ],
+      3,
+      1
+    )
+
+    const prCommentSetup = loadModule()
+    await prCommentSetup(map, [{ name: 'alice', id: 1, pullRequestNo: 42 }])
+
+    http.assertClean()
+  })
+
   it('finds the DCO bot comment when use-dco-flag is true', async () => {
     setDefaultInputs({ 'use-dco-flag': 'true' })
     canonicalBotInterceptor(http, 3)
+    // One write: a second update with the same body is skipped.
     dynamicBotCommentInterceptors(
       http,
       555,
@@ -246,7 +279,7 @@ describe('prCommentSetup', () => {
         }
       ],
       3,
-      2
+      1
     )
 
     const prCommentSetup = loadModule()
