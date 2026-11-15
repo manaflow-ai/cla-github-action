@@ -141,11 +141,12 @@ export async function preparePrComment(
           }
           await assertBotCommentPlanCurrent(expectedBotComment)
           await beforeWrite?.()
-          await updateComment(
-            reactedCommitters.allSignedFlag,
-            committerMap,
-            claBotComment
-          )
+          // Compare with the body the comment holds now (the first update
+          // above may have changed it), never the body first read.
+          await updateComment(reactedCommitters.allSignedFlag, committerMap, {
+            ...claBotComment,
+            body: expectedBotComment.body
+          })
         })
     }
   } catch (error) {
@@ -255,12 +256,17 @@ async function updateComment(
   committerMap: CommitterMap,
   claBotComment: any
 ): Promise<unknown> {
+  const body = commentContent(signed, committerMap)
+  // Rewriting the same body changes nothing a reader sees, but it is a write
+  // on GITHUB_TOKEN, which a spent budget refuses: an all-signed PR then went
+  // red (manaflow-ai/cmux#42518). Skip it and keep the comment as it is.
+  if (claBotComment?.body === body) return claBotComment
   try {
     const response = await octokit.rest.issues.updateComment({
       owner: context.repo.owner,
       repo: context.repo.repo,
       comment_id: claBotComment.id,
-      body: commentContent(signed, committerMap)
+      body
     })
     return response.data
   } catch (error) {
