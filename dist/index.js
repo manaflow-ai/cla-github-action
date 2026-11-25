@@ -48287,21 +48287,85 @@ function isGraphqlRateLimited(response) {
 }
 let readFallbackNoted = false;
 /**
- * The workflow token's client. When CLA_READ_TOKEN is set, a read that the
- * workflow token's spent budget refuses (a 403 or 429, or a GraphQL response
- * reporting RATE_LIMITED) is sent once more on that token (another
- * installation, another budget). Writes always stay on GITHUB_TOKEN, so
- * comments and ledger commits keep the github-actions[bot] identity the
- * marker-comment check trusts.
+ * How long a rate-limited run may wait in total for GitHub's budget to come
+ * back, unless CLA_RATE_LIMIT_MAX_WAIT_SECONDS says otherwise. It sits inside
+ * a 10 minute job timeout with room for the check itself.
+ */
+const DEFAULT_RATE_LIMIT_MAX_WAIT_S = 420;
+/** The wait when a refusal names neither retry-after nor x-ratelimit-reset. */
+const RATE_LIMIT_FALLBACK_WAIT_S = 60;
+const realClock = {
+    now: () => Date.now(),
+    sleep: ms => new Promise(resolve => setTimeout(resolve, ms))
+};
+let clock = realClock;
+let waitedMs = 0;
+function maxWaitMs() {
+    const raw = process.env.CLA_RATE_LIMIT_MAX_WAIT_SECONDS;
+    const seconds = raw === undefined || raw.trim() === '' ? NaN : Number(raw);
+    return ((Number.isFinite(seconds) && seconds >= 0
+        ? seconds
+        : DEFAULT_RATE_LIMIT_MAX_WAIT_S) * 1000);
+}
+function headerOf(source, name) {
+    const s = source;
+    const value = s?.response?.headers?.[name] ?? s?.headers?.[name];
+    return value === undefined || value === null ? undefined : String(value);
+}
+/**
+ * How long until a rate-limited answer (a thrown 403/429, or a resolved
+ * GraphQL response reporting RATE_LIMITED) may be sent again, and why:
+ * retry-after (secondary limits) first, then x-ratelimit-reset (the primary
+ * budget's reset, epoch seconds) plus a second of slack, else a minute.
+ */
+function rateLimitWait(source, now) {
+    const retryAfter = Number(headerOf(source, 'retry-after'));
+    if (Number.isFinite(retryAfter) && retryAfter >= 0) {
+        return { ms: retryAfter * 1000, why: 'retry-after' };
+    }
+    const reset = Number(headerOf(source, 'x-ratelimit-reset'));
+    if (Number.isFinite(reset) && reset > 0) {
+        return {
+            ms: Math.max(0, reset * 1000 - now) + 1000,
+            why: `x-ratelimit-reset ${new Date(reset * 1000).toISOString()}`
+        };
+    }
+    return { ms: RATE_LIMIT_FALLBACK_WAIT_S * 1000, why: 'no reset header' };
+}
+/** Every token in CLA_READ_TOKEN (one, or several separated by commas or whitespace). */
+function readTokens(raw) {
+    return (raw || '').split(/[\s,]+/).filter(Boolean);
+}
+function isBadCredential(error) {
+    return error?.status === 401;
+}
+/**
+ * The workflow token's client. When CLA_READ_TOKEN holds one or more tokens,
+ * a read that the workflow token's spent budget refuses (a 403 or 429, or a
+ * GraphQL response reporting RATE_LIMITED) is sent on each of them in turn
+ * (other installations, other budgets); a read token GitHub no longer
+ * accepts (401) is skipped. Writes always stay on GITHUB_TOKEN, so comments
+ * and ledger commits keep the github-actions[bot] identity the marker-comment
+ * check trusts.
+ *
+ * When every token that may carry the request is rate limited, the request
+ * waits for the soonest of their resets (retry-after or x-ratelimit-reset)
+ * and is sent again, so a spent budget makes the check wait instead of fail.
+ * The run's total wait is capped by CLA_RATE_LIMIT_MAX_WAIT_SECONDS (default
+ * 420, inside the job timeout); a wait that would pass the cap fails with
+ * GitHub's refusal, as before.
  */
 function withReadFallback(client, readToken, clientOptions) {
-    let reader;
-    const retryOnReader = async (requestOptions) => {
+    const tokens = Array.isArray(readToken) ? readToken : readTokens(readToken);
+    const readers = tokens.map(() => undefined);
+    const dead = new Set();
+    const sendOnReader = async (index, requestOptions) => {
         if (!readFallbackNoted) {
             readFallbackNoted = true;
             warning('GITHUB_TOKEN rate limit reached; reads continue on CLA_READ_TOKEN, writes stay on GITHUB_TOKEN.');
         }
-        reader = reader || buildOctokit(readToken, clientOptions);
+        const reader = (readers[index] =
+            readers[index] || buildOctokit(tokens[index], clientOptions));
         const { headers, request: _transport, ...rest } = requestOptions;
         const plain = { ...(headers || {}) };
         delete plain.authorization;
@@ -48310,27 +48374,79 @@ function withReadFallback(client, readToken, clientOptions) {
     client.hook.wrap('request', async (request, options) => {
         const requestOptions = options;
         const read = isReadRequest(requestOptions);
-        let response;
-        try {
-            response = await request(options);
+        for (;;) {
+            const refusals = [];
+            let lastError;
+            let lastResponse;
+            let response;
+            try {
+                response = await request(options);
+            }
+            catch (error) {
+                if (!isRateLimited(error))
+                    throw error;
+                refusals.push(error);
+                lastError = error;
+            }
+            if (response !== undefined) {
+                if (!(read && isGraphqlRateLimited(response)))
+                    return response;
+                refusals.push(response);
+                lastResponse = response;
+            }
+            if (read) {
+                for (let i = 0; i < tokens.length; i++) {
+                    if (dead.has(i))
+                        continue;
+                    let answer;
+                    try {
+                        answer = await sendOnReader(i, requestOptions);
+                    }
+                    catch (error) {
+                        if (isBadCredential(error)) {
+                            dead.add(i);
+                            warning(`CLA_READ_TOKEN #${i + 1} was refused (401); reads skip it.`);
+                            continue;
+                        }
+                        if (!isRateLimited(error))
+                            throw error;
+                        refusals.push(error);
+                        lastError = error;
+                        lastResponse = undefined;
+                        continue;
+                    }
+                    if (!isGraphqlRateLimited(answer))
+                        return answer;
+                    refusals.push(answer);
+                    lastResponse = answer;
+                    lastError = undefined;
+                }
+            }
+            const now = clock.now();
+            const wait = refusals
+                .map(r => rateLimitWait(r, now))
+                .reduce((a, b) => (b.ms < a.ms ? b : a));
+            const cap = maxWaitMs();
+            const target = `${requestOptions.method || 'GET'} ${requestOptions.url || ''}`;
+            const live = read ? tokens.length - dead.size + 1 : 1;
+            const who = live > 1 ? `all ${live} tokens` : 'GITHUB_TOKEN';
+            if (waitedMs + wait.ms > cap) {
+                warning(`GitHub rate limit: ${who} spent for ${target}; the next reset is in ${Math.ceil(wait.ms / 1000)}s (${wait.why}), past the ${Math.round(cap / 1000)}s wait cap (${Math.round(waitedMs / 1000)}s already waited); failing.`);
+                if (lastError !== undefined)
+                    throw lastError;
+                return lastResponse;
+            }
+            info(`GitHub rate limit: ${who} spent for ${target}; waiting ${Math.ceil(wait.ms / 1000)}s (${wait.why}), ${Math.round((cap - waitedMs - wait.ms) / 1000)}s of the ${Math.round(cap / 1000)}s cap left after.`);
+            waitedMs += wait.ms;
+            await clock.sleep(wait.ms);
         }
-        catch (error) {
-            if (!read || !isRateLimited(error))
-                throw error;
-            return retryOnReader(requestOptions);
-        }
-        if (read && isGraphqlRateLimited(response)) {
-            return (await retryOnReader(requestOptions));
-        }
-        return response;
     });
     return client;
 }
 function getDefaultOctokitClient() {
     if (!defaultClient) {
         const client = buildOctokit(readEnvToken('GITHUB_TOKEN'));
-        const readToken = process.env.CLA_READ_TOKEN;
-        defaultClient = readToken ? withReadFallback(client, readToken) : client;
+        defaultClient = withReadFallback(client, process.env.CLA_READ_TOKEN);
     }
     return defaultClient;
 }
@@ -48367,6 +48483,12 @@ function _resetOctokitClientsForTests() {
     defaultClient = undefined;
     patClient = undefined;
     readFallbackNoted = false;
+    waitedMs = 0;
+    clock = realClock;
+}
+/** For tests: a fake clock, so a rate-limit wait neither sleeps nor reads the wall clock. */
+function _setRateLimitClockForTests(fake) {
+    clock = fake;
 }
 
 ;// CONCATENATED MODULE: ./src/shared/errors.ts
