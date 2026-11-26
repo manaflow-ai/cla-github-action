@@ -48131,6 +48131,13 @@ const getExpectedSigningComment = () => {
 const getRequiredBaseRef = () => getInput('required-base-ref', { required: false }) || 'main';
 const getAllowListItem = () => getInput('allowlist', { required: false });
 const getAllowListIds = () => getInput('allowlist-ids', { required: false });
+/**
+ * Commit status context that vouches for an automated merge of the base
+ * branch into a Pull Request (see trustedMergeStatus.ts). Empty disables it.
+ */
+const getTrustedMergeStatusContext = () => getInput('trusted-merge-status-context', { required: false }).trim();
+/** Numeric account IDs whose trusted merge status counts. */
+const getTrustedMergeStatusCreatorIds = () => getInput('trusted-merge-status-creator-ids', { required: false }).trim();
 const getSignedCommitMessage = () => getInput('signed-commit-message', { required: false });
 const getCreateFileCommitMessage = () => getInput('create-file-commit-message', { required: false });
 const getCustomNotSignedPrComment = () => getInput('custom-notsigned-prcomment', { required: false });
@@ -48237,12 +48244,155 @@ function readEnvToken(name) {
         throw new Error(`${name} environment variable is required`);
     return v;
 }
-function buildOctokit(token) {
-    return getOctokit(token);
+function buildOctokit(token, options) {
+    return getOctokit(token, options);
+}
+/**
+ * Whether a request only reads: a GET or HEAD, or a GraphQL query (never a
+ * mutation). Only these may move to the read token.
+ */
+function isReadRequest(options) {
+    const method = (options.method || 'GET').toUpperCase();
+    if (method === 'GET' || method === 'HEAD')
+        return true;
+    if (method !== 'POST' || options.url !== '/graphql')
+        return false;
+    const query = typeof options.query === 'string' ? options.query.trim() : '';
+    return query.startsWith('{') || /^query\b/.test(query);
+}
+/**
+ * Whether GitHub refused a request for a spent budget: a 403 or 429 that says
+ * so, or that carries X-RateLimit-Remaining 0.
+ */
+function isRateLimited(error) {
+    const e = error;
+    if (e?.status !== 403 && e?.status !== 429)
+        return false;
+    const remaining = e.response?.headers?.['x-ratelimit-remaining'];
+    return (String(remaining) === '0' || /rate limit/i.test(String(e.message || '')));
+}
+/**
+ * Whether a GraphQL response that resolved (HTTP 200) reports a spent budget:
+ * GitHub answers a spent GraphQL budget with an `errors` entry of type
+ * RATE_LIMITED, not with a 403.
+ */
+function isGraphqlRateLimited(response) {
+    const errors = response?.data?.errors;
+    if (!Array.isArray(errors))
+        return false;
+    return errors.some(item => {
+        const e = item;
+        return (e?.type === 'RATE_LIMITED' || /rate limit/i.test(String(e?.message || '')));
+    });
+}
+let readFallbackNoted = false;
+/**
+ * The read tokens CLA_READ_TOKEN names, in the order they are tried. The
+ * value is one token or a comma-separated list; empty entries are dropped, so
+ * an unset secret in `${{ secrets.A }},${{ steps.b.outputs.token }}` (which
+ * leaves a leading comma) is ignored, and a repeated token is tried once.
+ */
+function parseReadTokens(value) {
+    const tokens = [];
+    for (const entry of String(value || '').split(',')) {
+        const token = entry.trim();
+        if (token && !tokens.includes(token))
+            tokens.push(token);
+    }
+    return tokens;
+}
+/** Whether GitHub refused a token itself: expired, revoked or malformed. */
+function isBadCredentials(error) {
+    return error?.status === 401;
+}
+/**
+ * The workflow token's client. When CLA_READ_TOKEN names read tokens, a read
+ * that the workflow token's spent budget refuses (a 403 or 429, or a GraphQL
+ * response reporting RATE_LIMITED) is sent again on those tokens in order
+ * (other installations, other budgets). A read token that answers 401 is
+ * skipped for the rest of the run, and one whose own budget is spent passes
+ * the read to the next; the last refusal is thrown when none is left. Writes
+ * always stay on GITHUB_TOKEN, so comments and ledger commits keep the
+ * github-actions[bot] identity the marker-comment check trusts.
+ */
+function withReadFallback(client, readTokens, clientOptions) {
+    const tokens = Array.isArray(readTokens)
+        ? parseReadTokens(readTokens.join(','))
+        : parseReadTokens(readTokens);
+    const readers = new Map();
+    const rejected = new Set();
+    const retryOnReaders = async (requestOptions, refusal) => {
+        if (!readFallbackNoted) {
+            readFallbackNoted = true;
+            warning('GITHUB_TOKEN rate limit reached; reads continue on CLA_READ_TOKEN, writes stay on GITHUB_TOKEN.');
+        }
+        const { headers, request: _transport, ...rest } = requestOptions;
+        const plain = { ...(headers || {}) };
+        delete plain.authorization;
+        let last = refusal;
+        for (const [index, token] of tokens.entries()) {
+            if (rejected.has(token))
+                continue;
+            let reader = readers.get(token);
+            if (!reader) {
+                reader = buildOctokit(token, clientOptions);
+                readers.set(token, reader);
+            }
+            try {
+                const response = await reader.request({
+                    ...rest,
+                    headers: plain
+                });
+                if (isReadRequest(requestOptions) && isGraphqlRateLimited(response)) {
+                    last = response;
+                    continue;
+                }
+                return response;
+            }
+            catch (error) {
+                if (isBadCredentials(error)) {
+                    rejected.add(token);
+                    warning(`CLA_READ_TOKEN entry ${index + 1} answered 401; skipping it for this run.`);
+                    last = error;
+                    continue;
+                }
+                if (isRateLimited(error)) {
+                    last = error;
+                    continue;
+                }
+                throw error;
+            }
+        }
+        if (last instanceof Error || last?.status) {
+            throw last;
+        }
+        return last;
+    };
+    if (tokens.length === 0)
+        return client;
+    client.hook.wrap('request', async (request, options) => {
+        const requestOptions = options;
+        const read = isReadRequest(requestOptions);
+        let response;
+        try {
+            response = await request(options);
+        }
+        catch (error) {
+            if (!read || !isRateLimited(error))
+                throw error;
+            return retryOnReaders(requestOptions, error);
+        }
+        if (read && isGraphqlRateLimited(response)) {
+            return retryOnReaders(requestOptions, response);
+        }
+        return response;
+    });
+    return client;
 }
 function getDefaultOctokitClient() {
     if (!defaultClient) {
-        defaultClient = buildOctokit(readEnvToken('GITHUB_TOKEN'));
+        const client = buildOctokit(readEnvToken('GITHUB_TOKEN'));
+        defaultClient = withReadFallback(client, parseReadTokens(process.env.CLA_READ_TOKEN));
     }
     return defaultClient;
 }
@@ -48278,6 +48428,7 @@ function isPersonalAccessTokenPresent() {
 function _resetOctokitClientsForTests() {
     defaultClient = undefined;
     patClient = undefined;
+    readFallbackNoted = false;
 }
 
 ;// CONCATENATED MODULE: ./src/shared/errors.ts
@@ -48322,8 +48473,103 @@ const MAX_LEDGER_WRITE_ATTEMPTS = 3;
 // A first-file create can lose a race with another Pull Request. Retry only
 // the safe read that confirms the other run created a valid ledger.
 const MAX_LEDGER_CREATE_RECOVERY_ATTEMPTS = 3;
+// Commit status lookups for merge commits that may be vouched for by a
+// trusted merge status. Merge commits past this bound are treated as
+// unvouched and their authors must sign as usual.
+const MAX_TRUSTED_MERGE_STATUS_LOOKUPS = 20;
+// Status pages (100 each, newest first) searched for the trusted context on
+// one merge commit. A context not found within them counts as unvouched.
+const MAX_TRUSTED_MERGE_STATUS_PAGES = 5;
+
+;// CONCATENATED MODULE: ./src/trustedMergeStatus.ts
+
+
+
+
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+/**
+ * Reads the optional trusted merge vouching configuration. Both inputs are
+ * required together; a partial or malformed configuration fails the run
+ * instead of silently widening or narrowing who must sign.
+ */
+function getTrustedMergeStatus() {
+    const statusContext = getTrustedMergeStatusContext();
+    const rawIds = getTrustedMergeStatusCreatorIds();
+    if (!statusContext && !rawIds)
+        return undefined;
+    if (!statusContext || !rawIds) {
+        throw new Error('trusted-merge-status-context and trusted-merge-status-creator-ids must be provided together');
+    }
+    if (/[\r\n]/.test(statusContext) || statusContext.length > 255) {
+        throw new Error('trusted-merge-status-context is malformed');
+    }
+    const creatorIds = new Set();
+    for (const raw of rawIds.split(',')) {
+        const entry = raw.trim();
+        const id = Number(entry);
+        if (!/^[1-9][0-9]*$/.test(entry) || !Number.isSafeInteger(id)) {
+            throw new Error('trusted-merge-status-creator-ids must be comma-separated numeric GitHub account IDs');
+        }
+        creatorIds.add(id);
+    }
+    return {
+        context: statusContext,
+        creatorIds,
+        remainingLookups: MAX_TRUSTED_MERGE_STATUS_LOOKUPS
+    };
+}
+/**
+ * A merge commit is exempt from signing when this repository's newest commit
+ * status with the configured context is a success created by a configured
+ * account. Commit statuses are stored per repository and only a token with
+ * statuses write access to this repository can create one, so a fork cannot
+ * vouch for its own commits, and git author, committer, and signature
+ * metadata play no part. The status names one exact commit, so it cannot be
+ * moved to a different tree. Single-parent commits are never exempt.
+ */
+async function isTrustedMergeCommit(commit, trust) {
+    if (!commit.parents || commit.parents.totalCount < 2)
+        return false;
+    if (typeof commit.oid !== 'string' || !COMMIT_SHA.test(commit.oid)) {
+        return false;
+    }
+    if (trust.remainingLookups <= 0)
+        return false;
+    trust.remainingLookups -= 1;
+    const newest = await findNewestStatus(commit.oid, trust.context);
+    const creatorId = newest?.creator?.id;
+    return Boolean(newest &&
+        newest.state === 'success' &&
+        typeof creatorId === 'number' &&
+        trust.creatorIds.has(creatorId));
+}
+/**
+ * Returns this repository's newest status for `statusContext` on `sha`, or
+ * undefined. GitHub lists statuses newest first, 100 per page, so the first
+ * match is the newest. Only the newest status counts: a later failure or a
+ * later status from another account revokes the exemption. Paging stops at
+ * MAX_TRUSTED_MERGE_STATUS_PAGES; a context not found by then is unvouched.
+ */
+async function findNewestStatus(sha, statusContext) {
+    for (let page = 1; page <= MAX_TRUSTED_MERGE_STATUS_PAGES; page++) {
+        const response = await octokit.rest.repos.listCommitStatusesForRef({
+            owner: github_context.repo.owner,
+            repo: github_context.repo.repo,
+            ref: sha,
+            per_page: 100,
+            page
+        });
+        const match = response.data.find(status => status.context === statusContext);
+        if (match)
+            return match;
+        if (response.data.length < 100)
+            return undefined;
+    }
+    return undefined;
+}
 
 ;// CONCATENATED MODULE: ./src/graphql.ts
+
 
 
 
@@ -48341,6 +48587,8 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
                 edges {
                     node {
                         commit {
+                            oid
+                            parents { totalCount }
                             author {
                                 email
                                 name
@@ -48370,7 +48618,9 @@ query($owner:String! $name:String! $number:Int! $cursor:String){
  * collected so the opener authorship guard can accept a Co-authored-by
  * trailer. The git committer field is ignored: it names whoever applied the
  * commit (a maintainer, GitHub's web-flow merge, a rebase tool), not a
- * copyright holder, so it never creates a signing obligation.
+ * copyright holder, so it never creates a signing obligation. A merge commit
+ * vouched for by a trusted merge status (trustedMergeStatus.ts) contributes
+ * no identities at all.
  */
 async function getCommitters(expectedHeadSha) {
     try {
@@ -48378,6 +48628,8 @@ async function getCommitters(expectedHeadSha) {
             throw new Error('The live Pull Request head commit is missing; refusing to query commit identities');
         }
         const committers = new Map();
+        const trustedMergeStatus = getTrustedMergeStatus();
+        /** Records one GitHub actor under the given role, merging duplicates. */
         const addActor = (actor, role) => {
             const roles = {
                 isPrimaryAuthor: role === 'primaryAuthor',
@@ -48453,6 +48705,10 @@ async function getCommitters(expectedHeadSha) {
                 if (identityAssertionCount > MAX_GIT_IDENTITY_ASSERTIONS) {
                     throw new Error(`A Pull Request reports more than ${MAX_GIT_IDENTITY_ASSERTIONS} git identity assertions. The action will fail closed.`);
                 }
+                if (trustedMergeStatus &&
+                    (await isTrustedMergeCommit(commit, trustedMergeStatus))) {
+                    continue;
+                }
                 addActor(commit.author, 'primaryAuthor');
                 commit.authors.nodes
                     .slice(1)
@@ -48479,6 +48735,10 @@ async function getCommitters(expectedHeadSha) {
         throw new Error(`GraphQL call to get commit identities failed: ${errorMessage(e)}`);
     }
 }
+/**
+ * Adds an identity to the map, or merges its roles and email into the
+ * existing entry for the same account ID, email, or name.
+ */
 function addCommitter(committers, incoming) {
     const key = identityKey(incoming);
     const current = committers.get(key);
@@ -48491,6 +48751,7 @@ function addCommitter(committers, incoming) {
     if (!current.email && incoming.email)
         current.email = incoming.email;
 }
+/** Map key for an identity: account ID, else email, else lowercased name. */
 function identityKey(committer) {
     if (committer.id > 0)
         return `id:${committer.id}`;
@@ -48498,6 +48759,10 @@ function identityKey(committer) {
         return `email:${committer.email.toLowerCase()}`;
     return `unknown:${committer.name.toLowerCase()}`;
 }
+/**
+ * Whether two GraphQL actors are the same identity: by account ID when both
+ * have one, otherwise by case-insensitive email.
+ */
 function actorsMatch(left, right) {
     if (!right)
         return false;
@@ -49095,7 +49360,12 @@ async function preparePrComment(committerMap, committers, preloadedComments, acc
                 }
                 await assertBotCommentPlanCurrent(expectedBotComment);
                 await beforeWrite?.();
-                await updateComment(reactedCommitters.allSignedFlag, committerMap, claBotComment);
+                // Compare with the body the comment holds now (the first update
+                // above may have changed it), never the body first read.
+                await updateComment(reactedCommitters.allSignedFlag, committerMap, {
+                    ...claBotComment,
+                    body: expectedBotComment.body
+                });
             })
         };
     }
@@ -49178,12 +49448,18 @@ async function createComment(signed, committerMap) {
     });
 }
 async function updateComment(signed, committerMap, claBotComment) {
+    const body = commentContent(signed, committerMap);
+    // Rewriting the same body changes nothing a reader sees, but it is a write
+    // on GITHUB_TOKEN, which a spent budget refuses: an all-signed PR then went
+    // red (manaflow-ai/cmux#42518). Skip it and keep the comment as it is.
+    if (claBotComment?.body === body)
+        return claBotComment;
     try {
         const response = await octokit.rest.issues.updateComment({
             owner: github_context.repo.owner,
             repo: github_context.repo.repo,
             comment_id: claBotComment.id,
-            body: commentContent(signed, committerMap)
+            body
         });
         return response.data;
     }
