@@ -48287,26 +48287,89 @@ function isGraphqlRateLimited(response) {
 }
 let readFallbackNoted = false;
 /**
- * The workflow token's client. When CLA_READ_TOKEN is set, a read that the
- * workflow token's spent budget refuses (a 403 or 429, or a GraphQL response
- * reporting RATE_LIMITED) is sent once more on that token (another
- * installation, another budget). Writes always stay on GITHUB_TOKEN, so
- * comments and ledger commits keep the github-actions[bot] identity the
- * marker-comment check trusts.
+ * The read tokens CLA_READ_TOKEN names, in the order they are tried. The
+ * value is one token or a comma-separated list; empty entries are dropped, so
+ * an unset secret in `${{ secrets.A }},${{ steps.b.outputs.token }}` (which
+ * leaves a leading comma) is ignored, and a repeated token is tried once.
  */
-function withReadFallback(client, readToken, clientOptions) {
-    let reader;
-    const retryOnReader = async (requestOptions) => {
+function parseReadTokens(value) {
+    const tokens = [];
+    for (const entry of String(value || '').split(',')) {
+        const token = entry.trim();
+        if (token && !tokens.includes(token))
+            tokens.push(token);
+    }
+    return tokens;
+}
+/** Whether GitHub refused a token itself: expired, revoked or malformed. */
+function isBadCredentials(error) {
+    return error?.status === 401;
+}
+/**
+ * The workflow token's client. When CLA_READ_TOKEN names read tokens, a read
+ * that the workflow token's spent budget refuses (a 403 or 429, or a GraphQL
+ * response reporting RATE_LIMITED) is sent again on those tokens in order
+ * (other installations, other budgets). A read token that answers 401 is
+ * skipped for the rest of the run, and one whose own budget is spent passes
+ * the read to the next; the last refusal is thrown when none is left. Writes
+ * always stay on GITHUB_TOKEN, so comments and ledger commits keep the
+ * github-actions[bot] identity the marker-comment check trusts.
+ */
+function withReadFallback(client, readTokens, clientOptions) {
+    const tokens = Array.isArray(readTokens)
+        ? parseReadTokens(readTokens.join(','))
+        : parseReadTokens(readTokens);
+    const readers = new Map();
+    const rejected = new Set();
+    const retryOnReaders = async (requestOptions, refusal) => {
         if (!readFallbackNoted) {
             readFallbackNoted = true;
             warning('GITHUB_TOKEN rate limit reached; reads continue on CLA_READ_TOKEN, writes stay on GITHUB_TOKEN.');
         }
-        reader = reader || buildOctokit(readToken, clientOptions);
         const { headers, request: _transport, ...rest } = requestOptions;
         const plain = { ...(headers || {}) };
         delete plain.authorization;
-        return reader.request({ ...rest, headers: plain });
+        let last = refusal;
+        for (const [index, token] of tokens.entries()) {
+            if (rejected.has(token))
+                continue;
+            let reader = readers.get(token);
+            if (!reader) {
+                reader = buildOctokit(token, clientOptions);
+                readers.set(token, reader);
+            }
+            try {
+                const response = await reader.request({
+                    ...rest,
+                    headers: plain
+                });
+                if (isReadRequest(requestOptions) && isGraphqlRateLimited(response)) {
+                    last = response;
+                    continue;
+                }
+                return response;
+            }
+            catch (error) {
+                if (isBadCredentials(error)) {
+                    rejected.add(token);
+                    warning(`CLA_READ_TOKEN entry ${index + 1} answered 401; skipping it for this run.`);
+                    last = error;
+                    continue;
+                }
+                if (isRateLimited(error)) {
+                    last = error;
+                    continue;
+                }
+                throw error;
+            }
+        }
+        if (last instanceof Error || last?.status) {
+            throw last;
+        }
+        return last;
     };
+    if (tokens.length === 0)
+        return client;
     client.hook.wrap('request', async (request, options) => {
         const requestOptions = options;
         const read = isReadRequest(requestOptions);
@@ -48317,10 +48380,10 @@ function withReadFallback(client, readToken, clientOptions) {
         catch (error) {
             if (!read || !isRateLimited(error))
                 throw error;
-            return retryOnReader(requestOptions);
+            return retryOnReaders(requestOptions, error);
         }
         if (read && isGraphqlRateLimited(response)) {
-            return (await retryOnReader(requestOptions));
+            return retryOnReaders(requestOptions, response);
         }
         return response;
     });
@@ -48329,8 +48392,7 @@ function withReadFallback(client, readToken, clientOptions) {
 function getDefaultOctokitClient() {
     if (!defaultClient) {
         const client = buildOctokit(readEnvToken('GITHUB_TOKEN'));
-        const readToken = process.env.CLA_READ_TOKEN;
-        defaultClient = readToken ? withReadFallback(client, readToken) : client;
+        defaultClient = withReadFallback(client, parseReadTokens(process.env.CLA_READ_TOKEN));
     }
     return defaultClient;
 }
